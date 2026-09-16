@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 load_dotenv(verbose=True)
 # --- IMPORT IMAGE ENGINE ---
 from image_engine import ImageGenerator
+from jellyfin_auth import jellyfin_headers, jellyfin_image_url, with_api_key
 # Jellyfin Server Configuration (Global Parameters)
 baseurl = os.getenv('JELLYFIN_BASEURL')
 token = os.getenv('JELLYFIN_TOKEN')
@@ -23,7 +24,7 @@ try:
     print(f'token:{token}')
     print(f'user_id:{user_id}')
     url = f"{baseurl}/Users/{user_id}"
-    response = requests.get(url, headers={"X-Emby-Token": token})
+    response = requests.get(url, headers=jellyfin_headers(token))
     response.raise_for_status()
     data = response.json()
     print(f"Connected to Jellyfin! User name: {data.get('Name')}")
@@ -77,7 +78,7 @@ def clean_filename(filename):
     return cleaned_filename
 
 def download_logo_in_memory(media_item):
-    logo_url = f"{baseurl}/Items/{media_item['Id']}/Images/Logo?api_key={token}"
+    logo_url = jellyfin_image_url(baseurl, media_item['Id'], 'Logo', token)
     
     try:
         response = requests.get(logo_url, timeout=10)
@@ -93,7 +94,7 @@ def download_logo_in_memory(media_item):
 
 def get_excluded_library_paths():
     """Fetch library IDs based on excluded library names."""
-    headers = {'X-Emby-Token': token}
+    headers = jellyfin_headers(token)
     response = requests.get(f"{baseurl}/Library/VirtualFolders", headers=headers)
     
     if response.status_code == 200:
@@ -109,7 +110,7 @@ def get_excluded_library_paths():
 excluded_library_paths = get_excluded_library_paths()
 
 def download_latest_media(order_by, limit, media_type):
-    headers = {'X-Emby-Token': token}
+    headers = jellyfin_headers(token)
     params = {
         'SortBy': order_by,
         'Limit': limit,
@@ -144,7 +145,7 @@ def download_latest_media(order_by, limit, media_type):
     # Process the sorted media
     for item in filtered_items:
         # Get the URL of the background image
-        background_url = f"{baseurl}/Items/{item['Id']}/Images/Backdrop?api_key={token}"
+        background_url = jellyfin_image_url(baseurl, item['Id'], 'Backdrop', token)
 
         if background_url:
             try:
@@ -185,7 +186,7 @@ def download_latest_media(order_by, limit, media_type):
                             duration_minutes = duration_ticks // (10**7 * 60)
                             tags.append(f"{duration_minutes // 60}h{duration_minutes % 60}min")
                     else:  # Series
-                        seasons_response = requests.get(f"{baseurl}/Shows/{item['Id']}/Seasons?api_key={token}", timeout=10)
+                        seasons_response = requests.get(with_api_key(f"{baseurl}/Shows/{item['Id']}/Seasons", token), headers=jellyfin_headers(token), timeout=10)
                         if seasons_response.ok:
                             seasons_count = len([s for s in seasons_response.json().get('Items', []) if s.get('Type') == 'Season' and s.get('IndexNumber', 0) > 0])
                             if seasons_count > 0:

@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 # Path to own module folder
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from gui_editor import load_config, save_config, fetch_tmdb_details
+from jellyfin_auth import jellyfin_headers, jellyfin_image_url
 
 # Import the missing search trigger script
 try:
@@ -212,7 +213,7 @@ def run_node_renderer(layout_path, metadata, output_base_path):
 def fetch_jellyfin_cron(config, job):
     jf = config.get('jellyfin', {})
     if not jf.get('url'): return []
-    headers = {"X-Emby-Token": jf['api_key']}
+    headers = jellyfin_headers(jf['api_key'])
     base_url = jf['url'].rstrip('/')
     
     boxset_ids = set()
@@ -273,8 +274,8 @@ def fetch_jellyfin_cron(config, job):
                 "officialRating": it.get('OfficialRating'),
                 "genres": ", ".join(it.get('Genres', [])),
                 "runtime": runtime,
-                "backdrop_url": f"{base_url}/Items/{it['Id']}/Images/Backdrop?api_key={jf['api_key']}",
-                "logo_url": None if is_in_boxset else (f"{base_url}/Items/{it['Id']}/Images/Logo?api_key={jf['api_key']}" if 'Logo' in it.get('ImageTags', {}) else None),
+                "backdrop_url": jellyfin_image_url(base_url, it['Id'], 'Backdrop', jf['api_key']),
+                "logo_url": None if is_in_boxset else (jellyfin_image_url(base_url, it['Id'], 'Logo', jf['api_key']) if 'Logo' in it.get('ImageTags', {}) else None),
                 "action_url": f"jellyfin://items/{it['Id']}",
                 "provider_ids": it.get('ProviderIds', {}),
                 "actors": [p.get('Name') for p in it.get('People', []) if p.get('Type') == 'Actor'],

@@ -1,4 +1,4 @@
-CURRENT_VERSION = "1.1.3"
+CURRENT_VERSION = "1.1.4"
 import os
 import sys
 import json
@@ -23,6 +23,7 @@ sys.dont_write_bytecode = True
 
 # --- IMPORT IMAGE ENGINE ---
 from image_engine import ImageGenerator
+from jellyfin_auth import jellyfin_headers, jellyfin_image_url
 
 # Import the missing search trigger script
 try:
@@ -382,7 +383,7 @@ def get_jellyfin_season_count(server_url, item_id, user_id, api_key):
     """Holt die echte Anzahl der Staffeln (ohne Specials/S0) für Jellyfin."""
     try:
         url = f"{server_url}/Shows/{item_id}/Seasons?userId={user_id}&Fields=IndexNumber"
-        headers = {"X-Emby-Token": api_key}
+        headers = jellyfin_headers(api_key)
         r = requests.get(url, headers=headers, timeout=5)
         if r.status_code == 200:
             items = r.json().get('Items', [])
@@ -412,7 +413,7 @@ def get_plex_season_count(server_url, rating_key, token):
 def format_jellyfin_item(item, clean_url, api_key, user_id=None):
     # Check for Logo availability
     has_logo = 'Logo' in item.get('ImageTags', {})
-    logo_url = f"{clean_url}/Items/{item['Id']}/Images/Logo?api_key={api_key}" if has_logo else None
+    logo_url = jellyfin_image_url(clean_url, item['Id'], 'Logo', api_key) if has_logo else None
 
     # Default Runtime logic
     ticks = item.get('RunTimeTicks', 0)
@@ -454,7 +455,7 @@ def format_jellyfin_item(item, clean_url, api_key, user_id=None):
         "studios": [s.get('Name') for s in item.get('Studios', [])],
         "provider_ids": item.get('ProviderIds', {}),
         "runtime": runtime_str,
-        "backdrop_url": f"{clean_url}/Items/{item['Id']}/Images/Backdrop?api_key={api_key}",
+        "backdrop_url": jellyfin_image_url(clean_url, item['Id'], 'Backdrop', api_key),
         "logo_url": logo_url,
         "officialRating": item.get('OfficialRating'),
         "inheritedParentalRatingValue": item.get('InheritedParentalRatingValue'),
@@ -466,7 +467,7 @@ def fetch_jellyfin_list(config, filter_mode, filter_val, item_types, limit_count
     jf = config.get('jellyfin', {})
     if not jf.get('url') or not jf.get('api_key'): return []
     
-    headers = {"X-Emby-Token": jf['api_key']}
+    headers = jellyfin_headers(jf['api_key'])
     jf_url = str(jf.get('url', '')).rstrip('/')
     clean_url = jf_url
 
@@ -712,7 +713,7 @@ def get_random_media():
     excluded_list = [x.strip() for x in excluded_libs.split(',') if x.strip()]
     
     if jf.get('url') and jf.get('api_key'):
-        headers = {"X-Emby-Token": jf['api_key']}
+        headers = jellyfin_headers(jf['api_key'])
         clean_url = jf['url'].rstrip('/')
         
         excluded_paths = []
@@ -805,7 +806,7 @@ def search_media():
     jf = config.get('jellyfin', {})
     if not jf.get('url') or not jf.get('api_key'): return jsonify([])
     
-    headers = {"X-Emby-Token": jf['api_key']}
+    headers = jellyfin_headers(jf['api_key'])
     clean_url = jf['url'].rstrip('/')
     url = f"{clean_url}/Users/{jf['user_id']}/Items?Recursive=true&IncludeItemTypes=Movie,Series&ExcludeItemTypes=BoxSet&SearchTerm={query}&Limit=10&Fields=Name,ProductionYear"
     
@@ -940,7 +941,7 @@ def get_media_item(item_id):
     if provider == "jellyfin":
         jf = config.get('jellyfin', {})
         if jf.get('url') and jf.get('api_key'):
-            headers = {"X-Emby-Token": jf['api_key']}
+            headers = jellyfin_headers(jf['api_key'])
             clean_url = str(jf.get('url', '')).rstrip('/')
 
             url = f"{clean_url}/Users/{jf['user_id']}/Items/{actual_id}?Fields=Type,Overview,Genres,CommunityRating,ProductionYear,RunTimeTicks,ImageTags,Path,ProviderIds,OfficialRating,InheritedParentalRatingValue,People"
@@ -1147,7 +1148,7 @@ def test_jellyfin():
         return jsonify({"status": "error", "message": "URL and API Key required"}), 400
         
     try:
-        headers = {"X-Emby-Token": api_key}
+        headers = jellyfin_headers(api_key)
         # Test connection by fetching system info
         r = requests.get(f"{url.rstrip('/')}/System/Info", headers=headers, timeout=5)
         r.raise_for_status()
