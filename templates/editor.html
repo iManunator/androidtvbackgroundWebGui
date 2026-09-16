@@ -2211,14 +2211,18 @@
         function testJellyfinConnection() {
             const url = document.getElementById('set-jf-url').value;
             const key = document.getElementById('set-jf-key').value;
+            const userField = document.getElementById('set-jf-user');
 
             fetch('/api/test/jellyfin', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url: url, api_key: key })
+                body: JSON.stringify({ url: url, api_key: key, user_id: userField ? userField.value : '' })
             })
                 .then(r => r.json())
                 .then(data => {
+                    if (data.status === 'success' && data.user_id && userField && !userField.value.trim()) {
+                        userField.value = data.user_id;
+                    }
                     alert(data.status === 'success' ? "✅ " + data.message : "❌ Error: " + data.message);
                 })
                 .catch(e => alert("❌ Network Error: Check Docker Logs"));
