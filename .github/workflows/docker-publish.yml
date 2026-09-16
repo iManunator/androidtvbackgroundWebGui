@@ -34,6 +34,7 @@ jobs:
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=raw,value=jellyfin12,enable={{is_default_branch}}
+            type=raw,value=seerr,enable={{is_default_branch}}
             type=semver,pattern={{version}}
             type=sha,prefix=
 

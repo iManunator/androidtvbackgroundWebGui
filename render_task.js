@@ -1573,6 +1573,10 @@ function getCertificationFilename(rating) {
                         if (!isNaN(limit) && limit > 0) val = val.split(',').slice(0, limit).join(',');
                     }
                     break;
+                case 'availability':
+                case 'availability_label':
+                    val = data.availability_label || data.availability || '';
+                    break;
                 case 'runtime':
                     val = data.runtime;
                     const rtCheck = String(val || "").toLowerCase().replace(/\s/g, '');
@@ -1599,6 +1603,7 @@ function getCertificationFilename(rating) {
                     let providerText = "";
                     let providerLogo = null;
                     let source = data.source || "Jellyfin";
+                    const avail = data.availability;
 
                     // Logic based on provider
                     if (source === 'TMDB') {
@@ -1607,6 +1612,15 @@ function getCertificationFilename(rating) {
                     } else if (source === 'Trakt') {
                         providerText = "Now on my watchlist ";
                         providerLogo = "traktlogo.png";
+                    } else if (source && (String(source).startsWith('Seerr') || source === 'Jellyseerr')) {
+                        if (avail === 'available' || avail === 'partial') {
+                            providerText = "Now available on ";
+                        } else if (avail === 'pending' || avail === 'processing' || String(source).includes('Pending')) {
+                            providerText = "Requested on ";
+                        } else {
+                            providerText = "Not in library — request on ";
+                        }
+                        providerLogo = "seerrlogo.png";
                     } else if (['Sonarr', 'Radarr', 'Jellyseerr'].includes(source) || (source && source.includes('Missing'))) {
                         providerText = (source && source.includes('Missing')) ? "Requested on " : "Soon available on ";
                         providerLogo = "jellyfinlogo.png";

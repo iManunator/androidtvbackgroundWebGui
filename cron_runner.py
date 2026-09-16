@@ -14,8 +14,9 @@ from datetime import datetime, timedelta
 
 # Path to own module folder
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from gui_editor import load_config, save_config, fetch_tmdb_details
 from jellyfin_auth import jellyfin_headers, jellyfin_image_url, jellyfin_items_base, resolve_jellyfin_user_id
+import seerr_client
+from gui_editor import load_config, save_config, fetch_tmdb_details
 
 # Import the missing search trigger script
 try:
@@ -558,6 +559,69 @@ def fetch_tmdb_cron(config, job):
     return meta_items
 
 
+def fetch_seerr_cron(config, job):
+    conf = seerr_client.get_seerr_conf(config)
+    if not conf.get("url") or not conf.get("api_key"):
+        return []
+
+    # source_mode trending is default for seerr jobs
+    time_window = job.get("seerr_time_window") or conf.get("trending_window") or "week"
+    availability = job.get("seerr_availability") or job.get("filter_value") or "all"
+    if job.get("filter_mode") in ("available", "not_available", "requestable"):
+        availability = job.get("filter_mode")
+    limit = job.get("limit", 20)
+    try:
+        limit_n = int(limit) if str(limit) != "0" else 20
+    except Exception:
+        limit_n = 20
+
+    item_types = job.get("item_types", "Movie,Series")
+    lang = (config.get("tmdb") or {}).get("language")
+    meta_items = []
+    try:
+        items = seerr_client.fetch_trending_items(
+            conf["url"],
+            conf["api_key"],
+            media_types=item_types,
+            time_window=time_window,
+            availability=availability,
+            limit=limit_n,
+            language=lang,
+        )
+        for it in items:
+            details = fetch_tmdb_details(str(it["tmdb_id"]), it["media_type"], config) or {}
+            mapped = {
+                "id": f"jellyseerr-{it['media_type']}-{it['tmdb_id']}",
+                "title": it.get("title") or details.get("title"),
+                "year": it.get("year") or details.get("year"),
+                "overview": it.get("overview") or details.get("overview") or "",
+                "rating": it.get("rating") or details.get("rating"),
+                "genres": it.get("genres") or details.get("genres") or "",
+                "runtime": it.get("runtime") or details.get("runtime"),
+                "actors": details.get("actors") or [],
+                "directors": details.get("directors") or [],
+                "imdb_id": details.get("imdb_id"),
+                "backdrop_url": seerr_client.tmdb_image_url(it.get("backdrop_path")) or details.get("backdrop_url"),
+                "logo_url": it.get("logo_url") or details.get("logo_url"),
+                "action_url": it.get("seerr_url"),
+                "seerr_url": it.get("seerr_url"),
+                "availability": it.get("availability"),
+                "availability_label": it.get("availability_label"),
+                "seerr_status": it.get("seerr_status"),
+                "in_library": it.get("in_library"),
+                "can_request": it.get("can_request"),
+                "tmdb_id": it.get("tmdb_id"),
+                "media_type": it.get("media_type"),
+                "source": "Seerr Requestable" if it.get("can_request") else (
+                    "Seerr Pending" if it.get("availability") in ("pending", "processing") else "Seerr"
+                ),
+            }
+            meta_items.append(mapped)
+    except Exception as e:
+        log(f"Seerr cron fetch error: {e}")
+    return meta_items
+
+
 def fetch_items_and_process(job=None):
     if not job: return
     job_name = job.get('name', 'Unnamed Job')
@@ -580,6 +644,8 @@ def fetch_items_and_process(job=None):
         elif p == 'radarr': 
             all_meta.extend(fetch_radarr_cron(config, job))
         elif p == 'tmdb': all_meta.extend(fetch_tmdb_cron(config, job))
+        elif p in ('jellyseerr', 'seerr'):
+            all_meta.extend(fetch_seerr_cron(config, job))
 
 
     log(f"Processing {len(all_meta)} items from {', '.join(providers)}...")

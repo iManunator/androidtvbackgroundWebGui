@@ -5,7 +5,7 @@ function toggleBatchInputs() {
     const filterMode = document.getElementById('batchFilterMode').value;
 
     document.getElementById('batchRandomSettings').style.display = (mode === 'random') ? 'block' : 'none';
-    document.getElementById('batchFilterSettings').style.display = (mode === 'library') ? 'block' : 'none';
+    document.getElementById('batchFilterSettings').style.display = (mode === 'library' || mode === 'trending') ? 'block' : 'none';
 
     // Filter Inputs
     document.getElementById('filterInputYear').style.display = (mode === 'library' && filterMode === 'year') ? 'block' : 'none';
@@ -40,9 +40,15 @@ function toggleCronInputs() {
         // If mode is library AND filter is missing, hide the value input
         if (mode === 'library' && filterMode === 'missing') {
             valInput.style.display = 'none';
-        } else if (mode === 'library' && filterMode !== 'all') {
+        } else if (mode === 'library' && filterMode !== 'all' && !['available','not_available','requestable'].includes(filterMode)) {
             valInput.style.display = 'block';
+        } else {
+            valInput.style.display = 'none';
         }
+    }
+    const seerrOpts = document.getElementById('cronSeerrOptions');
+    if (seerrOpts) {
+        seerrOpts.style.display = (mode === 'trending' || filterMode === 'available' || filterMode === 'not_available' || filterMode === 'requestable') ? 'block' : 'none';
     }
 }
 
@@ -56,6 +62,18 @@ function injectMissingFilterOption() {
             opt.value = 'missing';
             opt.innerText = 'Missing / Wanted (Radarr/Sonarr)';
             select.appendChild(opt);
+        }
+        if (select && !select.querySelector('option[value="requestable"]')) {
+            [
+                ['available', 'Seerr: Available'],
+                ['not_available', 'Seerr: Not in library'],
+                ['requestable', 'Seerr: Requestable']
+            ].forEach(([v, t]) => {
+                const o = document.createElement('option');
+                o.value = v;
+                o.innerText = t;
+                select.appendChild(o);
+            });
         }
     });
 }
@@ -138,28 +156,24 @@ async function startBatchProcess() {
     }
 
     let itemsToProcess = [];
-    if (mode === 'library') {
+    if (mode === 'library' || mode === 'trending') {
         let mediaType = document.getElementById('batchMediaType').value || 'Movie,Series';
         let limitVal = document.getElementById('batchMaxItems').value || '0';
 
-        const selectedProviders = Array.from(document.querySelectorAll('input[name="batchProvider"]:checked')).map(cb => cb.value);
-        // Note: We handle cleanup client-side now to support ID matching, so we don't pass &cleanup=true to the backend list API
-        
-        // --- TRIGGER MISSING SEARCH (Sonarr/Radarr) ---
-        // if (!dryRun) {
-        //     const pList = selectedProviders.map(p => p.toLowerCase());
-        //     if (pList.includes('sonarr') || pList.includes('radarr')) {
-        //         logBatch("Triggering background search for missing items (Sonarr/Radarr)...");
-        //         fetch('/api/trigger_search', {
-        //             method: 'POST',
-        //             headers: {'Content-Type': 'application/json'},
-        //             body: JSON.stringify({ providers: selectedProviders })
-        //         }).catch(e => logBatch("Warning: Could not trigger search: " + e));
-        //     }
-        // }
-        // ----------------------------------------------
+        let selectedProviders = Array.from(document.querySelectorAll('input[name="batchProvider"]:checked')).map(cb => cb.value);
+        if (mode === 'trending') {
+            if (!selectedProviders.includes('jellyseerr') && !selectedProviders.includes('seerr')) {
+                selectedProviders = ['jellyseerr'];
+            }
+            filterMode = ['available', 'not_available', 'requestable'].includes(filterMode) ? filterMode : 'trending';
+        }
 
-        let qs = `?mode=${filterMode}&types=${encodeURIComponent(mediaType)}&limit=${encodeURIComponent(limitVal)}&providers=${encodeURIComponent(selectedProviders.join(','))}`;
+        let qs = `?mode=${encodeURIComponent(mode === 'trending' ? 'trending' : filterMode)}&types=${encodeURIComponent(mediaType)}&limit=${encodeURIComponent(limitVal)}&providers=${encodeURIComponent(selectedProviders.join(','))}`;
+
+        if (mode === 'trending') {
+            qs += `&seerr_availability=${encodeURIComponent(['available','not_available','requestable'].includes(document.getElementById('batchFilterMode').value) ? document.getElementById('batchFilterMode').value : 'all')}`;
+            qs += `&seerr_time_window=week`;
+        }
 
         if (filterMode === 'year') qs += `&val=${encodeURIComponent(document.getElementById('batchFilterYear').value)}`;
         if (filterMode === 'genre') qs += `&val=${encodeURIComponent(document.getElementById('batchFilterGenre').value)}`;
@@ -172,7 +186,7 @@ async function startBatchProcess() {
             qs += `&genre=${encodeURIComponent(document.getElementById('batchFilterCustomGenre').value)}`;
         }
 
-        logBatch(`Fetching library list (Filter: ${filterMode})...`);
+        logBatch(`Fetching ${mode} list (Filter: ${filterMode})...`);
         const resp = await fetch('/api/media/list' + qs);
         const list = await resp.json();
         if (list.error) { logBatch("Error: " + list.error); stopBatchProcess(); return; }

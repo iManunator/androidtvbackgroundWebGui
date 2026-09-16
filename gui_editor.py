@@ -1,4 +1,4 @@
-CURRENT_VERSION = "1.1.5"
+CURRENT_VERSION = "1.2.0"
 import os
 import sys
 import json
@@ -29,6 +29,7 @@ from jellyfin_auth import (
     jellyfin_items_base,
     resolve_jellyfin_user_id,
 )
+import seerr_client
 
 # Import the missing search trigger script
 try:
@@ -227,7 +228,12 @@ def load_config():
         "tmdb": {"api_key": "", "language": "de-DE"},
         "radarr": {"url": "", "api_key": ""},
         "sonarr": {"url": "", "api_key": ""},
-        "jellyseerr": {"url": "", "api_key": ""},
+        "jellyseerr": {
+            "url": "",
+            "api_key": "",
+            "trending_window": "week",
+            "default_request_seasons": "all",
+        },
         "trakt": {"api_key": "", "username": "", "listname": ""},
         "omdb": {"api_key": ""},
         "editor": {"resolution": "1080"},
@@ -696,6 +702,110 @@ def fetch_radarr_list(config, filter_mode='all'):
     except: pass
     return []
 
+def format_seerr_item(norm: dict, config: dict = None) -> dict:
+    """Turn normalized Seerr item into editor media payload."""
+    if not norm:
+        return {}
+    backdrop = seerr_client.tmdb_image_url(norm.get("backdrop_path")) or seerr_client.tmdb_image_url(norm.get("poster_path"))
+    logo_url = norm.get("logo_url")
+    # Enrich logo via TMDB details when missing
+    if not logo_url and config:
+        try:
+            details = fetch_tmdb_details(str(norm["tmdb_id"]), norm["media_type"], config)
+            if details.get("logo_url"):
+                logo_url = details["logo_url"]
+            if not backdrop and details.get("backdrop_url"):
+                backdrop = details["backdrop_url"]
+            if details.get("actors") and not norm.get("actors"):
+                norm["actors"] = details.get("actors")
+            if details.get("directors") and not norm.get("directors"):
+                norm["directors"] = details.get("directors")
+            if details.get("imdb_id"):
+                norm["imdb_id"] = details.get("imdb_id")
+            if details.get("runtime") and not norm.get("runtime"):
+                norm["runtime"] = details.get("runtime")
+            if details.get("genres") and not norm.get("genres"):
+                norm["genres"] = details.get("genres")
+            if details.get("overview") and not norm.get("overview"):
+                norm["overview"] = details.get("overview")
+        except Exception:
+            pass
+
+    mt = norm["media_type"]
+    tid = norm["tmdb_id"]
+    avail = norm.get("availability") or "not_available"
+    source = "Seerr"
+    if avail == "available" or avail == "partial":
+        source = "Seerr"
+    elif avail in ("pending", "processing"):
+        source = "Seerr Pending"
+    else:
+        source = "Seerr Requestable"
+
+    return {
+        "id": f"jellyseerr-{mt}-{tid}",
+        "title": norm.get("title"),
+        "year": norm.get("year"),
+        "rating": norm.get("rating"),
+        "overview": norm.get("overview") or "",
+        "genres": norm.get("genres") or "",
+        "actors": norm.get("actors") or [],
+        "directors": norm.get("directors") or [],
+        "runtime": norm.get("runtime"),
+        "backdrop_url": backdrop,
+        "logo_url": logo_url,
+        "imdb_id": norm.get("imdb_id"),
+        "provider_ids": {"Tmdb": str(tid)},
+        "source": source,
+        "availability": avail,
+        "availability_label": norm.get("availability_label"),
+        "seerr_status": norm.get("seerr_status"),
+        "in_library": norm.get("in_library"),
+        "can_request": norm.get("can_request"),
+        "seerr_url": norm.get("seerr_url"),
+        "action_url": norm.get("seerr_url"),
+        "media_type": mt,
+        "tmdb_id": tid,
+    }
+
+
+def fetch_seerr_list(config, filter_mode, filter_val, item_types, limit_count, request_args=None):
+    conf = seerr_client.get_seerr_conf(config)
+    if not conf.get("url") or not conf.get("api_key"):
+        return []
+    request_args = request_args or {}
+    # mode=trending (or source_mode) uses discover/trending
+    mode = (filter_mode or "trending").lower()
+    if mode in ("all", "library", "recent", "year", "genre", "rating", "custom", "official_rating"):
+        mode = "trending"
+    time_window = (
+        request_args.get("seerr_time_window")
+        or conf.get("trending_window")
+        or "week"
+    )
+    availability = request_args.get("seerr_availability") or filter_val or "all"
+    if mode == "trending" and filter_val in ("available", "not_available", "requestable", "all"):
+        availability = filter_val
+    lang = (config.get("tmdb") or {}).get("language")
+    try:
+        items = seerr_client.fetch_trending_items(
+            conf["url"],
+            conf["api_key"],
+            media_types=item_types or "Movie,Series",
+            time_window=time_window,
+            availability=availability,
+            limit=limit_count or 50,
+            language=lang,
+        )
+        return [
+            {"Id": f"jellyseerr-{it['media_type']}-{it['tmdb_id']}", "Name": it.get("title") or f"{it['media_type']}-{it['tmdb_id']}"}
+            for it in items
+        ]
+    except Exception as e:
+        print(f"Seerr list error: {e}")
+        return []
+
+
 def fetch_tmdb_list(config, limit_count):
     t = config.get('tmdb', {})
     api_key = t.get('api_key')
@@ -724,6 +834,26 @@ def fetch_tmdb_list(config, limit_count):
 @gui_editor_bp.route('/api/media/random')
 def get_random_media():
     config = load_config()
+    provider = (request.args.get('provider') or request.args.get('providers') or 'jellyfin').split(',')[0].strip().lower()
+
+    # Prefer Seerr when explicitly requested
+    if provider in ('jellyseerr', 'seerr') and seerr_client.is_configured(config):
+        conf = seerr_client.get_seerr_conf(config)
+        try:
+            items = seerr_client.fetch_trending_items(
+                conf["url"],
+                conf["api_key"],
+                media_types=request.args.get('types', 'Movie,Series'),
+                time_window=request.args.get('seerr_time_window') or conf.get('trending_window') or 'week',
+                availability=request.args.get('seerr_availability') or 'all',
+                limit=request.args.get('limit', 40),
+                language=(config.get('tmdb') or {}).get('language'),
+            )
+            if items:
+                return jsonify(format_seerr_item(random.choice(items), config))
+        except Exception as e:
+            print(f"DEBUG: Seerr random error: {e}")
+
     jf = config.get('jellyfin', {})
     excluded_libs = jf.get('excluded_libraries', "")
     excluded_list = [x.strip() for x in excluded_libs.split(',') if x.strip()]
@@ -772,6 +902,20 @@ def get_random_media():
         except Exception as e:
             print(f"DEBUG: Jellyfin Error: {e}")
 
+    # Fallback: Seerr trending if configured
+    if seerr_client.is_configured(config):
+        conf = seerr_client.get_seerr_conf(config)
+        try:
+            items = seerr_client.fetch_trending_items(
+                conf["url"], conf["api_key"], limit=30,
+                time_window=conf.get("trending_window") or "week",
+                language=(config.get("tmdb") or {}).get("language"),
+            )
+            if items:
+                return jsonify(format_seerr_item(random.choice(items), config))
+        except Exception as e:
+            print(f"DEBUG: Seerr fallback error: {e}")
+
     # Fallback Data
     mock_samples = [
         {"title": "Interstellar", "year": 2014, "rating": 8.7, "overview": "Ein Team von Entdeckern nutzt ein neu entdecktes Wurmloch, um die Grenzen der menschlichen Raumfahrt zu überwinden und die weiten Entfernungen einer interstellaren Reise zu bewältigen.", "backdrop_url": clean_tmdb_url("/5XNQBqnBwPA9yT0jZ0p3s8bbLh0.jpg"), "logo_url": clean_tmdb_url("/eJjFbfeOuZPuPJFnDP3YJ5daSsg.png")},
@@ -815,6 +959,8 @@ def get_media_list():
             all_items.extend(fetch_radarr_list(config, filter_mode))
         elif p == 'tmdb':
             all_items.extend(fetch_tmdb_list(config, limit_count))
+        elif p in ('jellyseerr', 'seerr'):
+            all_items.extend(fetch_seerr_list(config, filter_mode, filter_val, item_types, limit_count, request.args))
             
     return jsonify(all_items)
 
@@ -989,6 +1135,29 @@ def get_media_item(item_id):
                 r = requests.get(url, headers=headers, timeout=5)
                 r.raise_for_status()
                 return jsonify(format_jellyfin_item(r.json(), clean_url, jf['api_key'], user_id))
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+    elif provider in ("jellyseerr", "seerr"):
+        # actual_id is movie-123 or tv-123
+        parts = actual_id.split("-")
+        if len(parts) >= 2:
+            mtype = parts[0]
+            tmdb_id = parts[1]
+            conf = seerr_client.get_seerr_conf(config)
+            if not conf.get("url") or not conf.get("api_key"):
+                return jsonify({"error": "Seerr not configured"}), 400
+            try:
+                detail = seerr_client.media_details(conf["url"], conf["api_key"], mtype, int(tmdb_id))
+                norm = seerr_client.normalize_result(detail, conf["url"])
+                if not norm:
+                    # Discover payloads differ; synthesize from detail + mediaInfo
+                    detail["mediaType"] = "tv" if mtype in ("tv", "show") else "movie"
+                    detail["id"] = int(tmdb_id)
+                    norm = seerr_client.normalize_result(detail, conf["url"])
+                if not norm:
+                    return jsonify({"error": "Unable to normalize Seerr item"}), 500
+                return jsonify(format_seerr_item(norm, config))
             except Exception as e:
                 return jsonify({"error": str(e)}), 500
                 
@@ -1270,18 +1439,60 @@ def test_sonarr():
 
 @gui_editor_bp.route('/api/test/jellyseerr', methods=['POST'])
 def test_jellyseerr():
-    data = request.json
+    data = request.json or {}
     url = data.get('url')
     api_key = data.get('api_key')
     if not url or not api_key:
         return jsonify({"status": "error", "message": "URL and API Key required"}), 400
     try:
-        headers = {'X-Api-Key': api_key}
-        r = requests.get(f"{url.rstrip('/')}/api/v1/status", headers=headers, timeout=5)
-        r.raise_for_status()
-        return jsonify({"status": "success", "message": f"Connected to Jellyseerr ({r.json().get('version', 'Unknown')})"})
+        info = seerr_client.status(url, api_key)
+        return jsonify({
+            "status": "success",
+            "message": f"Connected to Seerr/Jellyseerr ({info.get('version', 'Unknown')})",
+            "version": info.get("version"),
+        })
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@gui_editor_bp.route('/api/seerr/request', methods=['POST'])
+def seerr_create_request():
+    config = load_config()
+    conf = seerr_client.get_seerr_conf(config)
+    if not conf.get("url") or not conf.get("api_key"):
+        return jsonify({"status": "error", "message": "Seerr not configured"}), 400
+    data = request.json or {}
+    media_type = data.get("media_type") or data.get("mediaType") or "movie"
+    media_id = data.get("media_id") or data.get("mediaId") or data.get("tmdb_id")
+    if not media_id:
+        return jsonify({"status": "error", "message": "media_id required"}), 400
+    seasons = data.get("seasons", conf.get("default_request_seasons") or "all")
+    try:
+        body, code = seerr_client.create_request(
+            conf["url"], conf["api_key"], media_type, int(media_id), seasons=seasons
+        )
+        if code >= 400:
+            return jsonify({"status": "error", "message": body.get("message") or body, "detail": body}), code
+        return jsonify({"status": "success", "request": body})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@gui_editor_bp.route('/api/seerr/status/<media_type>/<int:tmdb_id>', methods=['GET'])
+def seerr_status_lookup(media_type, tmdb_id):
+    config = load_config()
+    conf = seerr_client.get_seerr_conf(config)
+    if not conf.get("url") or not conf.get("api_key"):
+        return jsonify({"status": "error", "message": "Seerr not configured"}), 400
+    try:
+        detail = seerr_client.media_details(conf["url"], conf["api_key"], media_type, tmdb_id)
+        detail["mediaType"] = "tv" if media_type in ("tv", "show", "series") else "movie"
+        detail["id"] = tmdb_id
+        norm = seerr_client.normalize_result(detail, conf["url"])
+        return jsonify(norm or {"error": "not found"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 
 @gui_editor_bp.route('/api/test/trakt', methods=['POST'])
 def test_trakt():

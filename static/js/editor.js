@@ -1091,10 +1091,68 @@ async function fetchMediaData(itemId = null) {
         if (btnSaveGallery) btnSaveGallery.disabled = false;
 
         if (!isBatchRunning) indicator.innerText = "Source: " + data.source;
+        updateSeerrUi(data);
     } catch (err) { console.error(err); indicator.innerText = "Error loading preview"; }
     finally {
         btn.disabled = false;
         btn.innerText = originalText;
+    }
+}
+
+function updateSeerrUi(data) {
+    const btn = document.getElementById('btn-request-seerr');
+    const chip = document.getElementById('availability-chip');
+    if (!btn || !chip) return;
+    const label = data && (data.availability_label || data.availability);
+    if (label) {
+        chip.style.display = 'inline-block';
+        chip.innerText = label;
+        const avail = data.availability;
+        if (avail === 'available' || avail === 'partial') chip.style.background = '#2e7d32';
+        else if (avail === 'pending' || avail === 'processing') chip.style.background = '#ef6c00';
+        else chip.style.background = '#6a1b9a';
+    } else {
+        chip.style.display = 'none';
+    }
+    if (data && data.can_request && data.tmdb_id) {
+        btn.style.display = 'inline-block';
+    } else {
+        btn.style.display = 'none';
+    }
+}
+
+async function requestCurrentViaSeerr() {
+    if (!lastFetchedData || !lastFetchedData.tmdb_id) {
+        alert('No Seerr requestable item loaded.');
+        return;
+    }
+    if (!lastFetchedData.can_request) {
+        alert('This title cannot be requested (already available or pending).');
+        return;
+    }
+    const mt = lastFetchedData.media_type || 'movie';
+    if (!confirm(`Request "${lastFetchedData.title}" via Seerr?`)) return;
+    try {
+        const r = await fetch('/api/seerr/request', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ media_type: mt, media_id: lastFetchedData.tmdb_id, seasons: 'all' })
+        });
+        const data = await r.json();
+        if (!r.ok || data.status === 'error') {
+            alert('❌ Request failed: ' + (data.message || JSON.stringify(data)));
+            return;
+        }
+        alert('✅ Request submitted to Seerr');
+        lastFetchedData.can_request = false;
+        lastFetchedData.availability = 'pending';
+        lastFetchedData.availability_label = 'Pending';
+        lastFetchedData.source = 'Seerr Pending';
+        updateSeerrUi(lastFetchedData);
+        const indicator = document.getElementById('source-indicator');
+        if (indicator) indicator.innerText = 'Source: Seerr Pending';
+    } catch (e) {
+        alert('❌ Network error requesting via Seerr');
     }
 }
 
@@ -1309,6 +1367,10 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                             val = val.split(',').slice(0, gLimit).join(',');
                         }
                         break;
+                    case 'availability':
+                    case 'availability_label':
+                        val = mediaData.availability_label || mediaData.availability || '';
+                        break;
                     case 'runtime':
                         val = mediaData.runtime;
                         const rtCheck = String(val || "").toLowerCase().replace(/\s/g, '');
@@ -1321,6 +1383,7 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                         const srcVal = (mediaData.source || "Jellyfin");
                         let pText = "";
                         let pLogo = null;
+                        const avail = mediaData.availability;
 
                         if (srcVal === 'TMDB') {
                             pText = "Now Trending on ";
@@ -1328,6 +1391,15 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                         } else if (srcVal === 'Trakt') {
                             pText = "Now on my watchlist ";
                             pLogo = "traktlogo.png";
+                        } else if (srcVal && (srcVal.startsWith('Seerr') || srcVal === 'Jellyseerr')) {
+                            if (avail === 'available' || avail === 'partial') {
+                                pText = "Now available on ";
+                            } else if (avail === 'pending' || avail === 'processing' || (srcVal && srcVal.includes('Pending'))) {
+                                pText = "Requested on ";
+                            } else {
+                                pText = "Not in library — request on ";
+                            }
+                            pLogo = "seerrlogo.png";
                         } else if (['Sonarr', 'Radarr', 'Jellyseerr'].includes(srcVal) || (srcVal && srcVal.includes('Missing'))) {
                             pText = (srcVal && srcVal.includes('Missing')) ? "Requested on " : "Soon available on ";
                             pLogo = "jellyfinlogo.png";
@@ -5525,6 +5597,13 @@ async function addCronJob() {
     const dryRun = document.getElementById('cronDryRun') ? document.getElementById('cronDryRun').checked : false;
 
     const providers = Array.from(document.querySelectorAll('input[name="cronProvider"]:checked')).map(cb => cb.value);
+    const seerrWindow = document.getElementById('cronSeerrWindow') ? document.getElementById('cronSeerrWindow').value : 'week';
+    let seerrAvailability = 'all';
+    if (['available', 'not_available', 'requestable'].includes(filterMode)) {
+        seerrAvailability = filterMode;
+    } else if (mode === 'trending') {
+        seerrAvailability = filterMode === 'all' ? 'all' : (filterVal || 'all');
+    }
 
     const newJob = {
         id: Date.now().toString(), // Simple ID
@@ -5545,6 +5624,8 @@ async function addCronJob() {
         item_types: document.getElementById('cronMediaType') ? document.getElementById('cronMediaType').value : 'Movie,Series',
         limit: document.getElementById('cronMaxItems') ? document.getElementById('cronMaxItems').value : '0',
         providers: providers,
+        seerr_time_window: seerrWindow,
+        seerr_availability: seerrAvailability,
         created_at: new Date().toISOString()
     };
 
@@ -5670,6 +5751,7 @@ function injectCronFilterUI() {
         <select id="cronSourceMode" style="width:100%; background:#333; color:#fff; border:1px solid #555; padding:5px; margin-bottom:10px;" onchange="toggleCronInputs()">
             <option value="library" selected>Library (All Items)</option>
             <option value="random">Random Selection</option>
+            <option value="trending">Trending (Seerr)</option>
         </select>
         
         <div id="cronFilterSettings">
@@ -5696,7 +5778,18 @@ function injectCronFilterUI() {
                 <option value="genre">By Genre</option>
                 <option value="rating">By Rating</option>
                 <option value="missing">Missing / Wanted (Radarr/Sonarr)</option>
+                <option value="available">Seerr: Available</option>
+                <option value="not_available">Seerr: Not in library</option>
+                <option value="requestable">Seerr: Requestable</option>
             </select>
+
+            <div id="cronSeerrOptions" style="display:none; margin-bottom:10px;">
+                <label style="display:block; color:#aaa; font-size:12px; margin-bottom:5px;">Seerr trending window</label>
+                <select id="cronSeerrWindow" style="width:100%; background:#333; color:#fff; border:1px solid #555; padding:5px;">
+                    <option value="week" selected>Week</option>
+                    <option value="day">Day</option>
+                </select>
+            </div>
             
             <input type="text" id="cronFilterValue" placeholder="Value (e.g. 2023 or Action)" style="width:100%; background:#333; color:#fff; border:1px solid #555; padding:5px; margin-bottom:10px; display:none;">
         </div>
@@ -6006,7 +6099,9 @@ async function saveSettings() {
         },
         jellyseerr: {
             url: document.getElementById('set-jellyseerr-url').value,
-            api_key: document.getElementById('set-jellyseerr-key').value
+            api_key: document.getElementById('set-jellyseerr-key').value,
+            trending_window: (document.getElementById('set-jellyseerr-window') || {}).value || 'week',
+            default_request_seasons: 'all'
         },
         trakt: {
             api_key: document.getElementById('set-trakt-key').value,

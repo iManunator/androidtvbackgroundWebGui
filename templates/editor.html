@@ -1071,6 +1071,8 @@
                         <button onclick="addMetadataTag('overview', 'Movie description...')">Overview</button>
                         <button onclick="addMetadataTag('provider_source', 'Now available on...')">Provider
                             Info</button>
+                        <button onclick="addMetadataTag('availability', 'Not in library')">Seerr Availability</button>
+                        <button onclick="addMetadataTag('availability_label', 'Requestable')">Seerr Status Label</button>
                         <button onclick="addMetadataTag('certification', 'FSK 16')">Age Rating (Image)</button>
                         <button onclick="addMetadataTag('actors', 'Actor 1, Actor 2...')">Actors</button>
                         <button onclick="addMetadataTag('directors', 'Director Name')">Directors</button>
@@ -1227,6 +1229,10 @@
                             <button id="btn-shuffle" onclick="fetchRandomPreview()"
                                 style="background: #1565c0; padding: 8px 15px; border: none; border-radius: 4px; color: white; cursor: pointer; box-shadow: 0 2px 5px rgba(0,0,0,0.5);"
                                 data-i18n="shuffle_preview">🎲 <span>Shuffle Preview</span></button>
+                            <button id="btn-request-seerr" onclick="requestCurrentViaSeerr()"
+                                style="display:none; background: #6a1b9a; padding: 8px 12px; border: none; border-radius: 4px; color: white; cursor: pointer;">Request via Seerr</button>
+                            <span id="availability-chip"
+                                style="display:none; font-size: 11px; padding: 4px 8px; border-radius: 10px; background:#333; color:#eee;"></span>
                             <span id="source-indicator"
                                 style="font-size: 11px; color: #aaa; text-shadow: 1px 1px 2px black;">Source:
                                 None</span>
@@ -1506,6 +1512,7 @@
                             <select id="batchMode" onchange="toggleBatchInputs()">
                                 <option value="random">Random Selection</option>
                                 <option value="library">Full Library</option>
+                                <option value="trending">Trending (Seerr)</option>
                             </select>
 
                             <div id="batchProviderSelection" style="margin-top: 10px;">
@@ -1541,6 +1548,11 @@
                                         style="display: flex; align-items: center; gap: 5px; font-size: 11px; cursor: pointer; margin: 0;">
                                         <input type="checkbox" name="batchProvider" value="tmdb"
                                             style="width: 14px; height: 14px; margin: 0;"> TMDB
+                                    </label>
+                                    <label
+                                        style="display: flex; align-items: center; gap: 5px; font-size: 11px; cursor: pointer; margin: 0;">
+                                        <input type="checkbox" name="batchProvider" value="jellyseerr"
+                                            style="width: 14px; height: 14px; margin: 0;"> Seerr
                                     </label>
 
                                 </div>
@@ -1720,6 +1732,11 @@
                                         style="display: flex; align-items: center; gap: 4px; font-size: 10px; cursor: pointer; margin: 0; color: #ccc;">
                                         <input type="checkbox" name="cronProvider" value="tmdb"
                                             style="width: 14px; height: 14px; margin: 0;"> TMDB
+                                    </label>
+                                    <label
+                                        style="display: flex; align-items: center; gap: 4px; font-size: 10px; cursor: pointer; margin: 0; color: #ccc;">
+                                        <input type="checkbox" name="cronProvider" value="jellyseerr"
+                                            style="width: 14px; height: 14px; margin: 0;"> Seerr
                                     </label>
 
                                 </div>
@@ -2102,15 +2119,19 @@
                 </div>
 
                 <div class="settings-panel settings-compact-panel" id="set-group-jellyseerr">
-                    <h3 onclick="toggleGroup('set-group-jellyseerr')"><span class="group-arrow">▼</span> Jellyseerr</h3>
+                    <h3 onclick="toggleGroup('set-group-jellyseerr')"><span class="group-arrow">▼</span> Seerr / Jellyseerr</h3>
                     <div class="group-content">
-                        <label for="set-jellyseerr-url">Jellyseerr URL</label>
-                        <input type="text" id="set-jellyseerr-url" value="{{ config.jellyseerr.url }}">
-                        <label for="set-jellyseerr-key" data-i18n="api_key">Jellyseerr API Key</label>
+                        <label for="set-jellyseerr-url">Seerr URL</label>
+                        <input type="text" id="set-jellyseerr-url" value="{{ config.jellyseerr.url }}" placeholder="http://172.16.1.171:5055">
+                        <label for="set-jellyseerr-key" data-i18n="api_key">API Key</label>
                         <input type="password" id="set-jellyseerr-key" value="{{ config.jellyseerr.api_key }}">
+                        <label for="set-jellyseerr-window">Trending window</label>
+                        <select id="set-jellyseerr-window" style="width:100%; padding:6px; background:#333; color:#fff; border:1px solid #555;">
+                            <option value="week" {% if config.jellyseerr.trending_window != 'day' %}selected{% endif %}>Week</option>
+                            <option value="day" {% if config.jellyseerr.trending_window == 'day' %}selected{% endif %}>Day</option>
+                        </select>
                         <button onclick="testJellyseerrConnection()"
-                            style="margin-top: 5px; background-color: #9c27b0; width: 100%;">Test
-                            Jellyseerr</button>
+                            style="margin-top: 5px; background-color: #9c27b0; width: 100%;">Test Seerr</button>
                     </div>
                 </div>
 
