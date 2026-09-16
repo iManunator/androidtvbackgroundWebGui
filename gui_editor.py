@@ -1,4 +1,4 @@
-CURRENT_VERSION = "1.1.3"
+CURRENT_VERSION = "1.1.5"
 import os
 import sys
 import json
@@ -23,6 +23,12 @@ sys.dont_write_bytecode = True
 
 # --- IMPORT IMAGE ENGINE ---
 from image_engine import ImageGenerator
+from jellyfin_auth import (
+    jellyfin_headers,
+    jellyfin_image_url,
+    jellyfin_items_base,
+    resolve_jellyfin_user_id,
+)
 
 # Import the missing search trigger script
 try:
@@ -265,6 +271,17 @@ def proxy_image():
         return "Missing URL", 400
     try:
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
+        # Jellyfin image URLs may still need Authorization even with ApiKey in query
+        # (and browsers cannot send that header on <img>/fabric loads).
+        try:
+            from urllib.parse import urlparse, parse_qs
+            parsed = urlparse(url)
+            qs = parse_qs(parsed.query)
+            token = (qs.get('ApiKey') or qs.get('api_key') or [None])[0]
+            if token and '/Items/' in parsed.path and '/Images/' in parsed.path:
+                headers.update(jellyfin_headers(token))
+        except Exception:
+            pass
         resp = requests.get(url, headers=headers, timeout=10)
         
         if resp.status_code != 200:
@@ -382,7 +399,7 @@ def get_jellyfin_season_count(server_url, item_id, user_id, api_key):
     """Holt die echte Anzahl der Staffeln (ohne Specials/S0) für Jellyfin."""
     try:
         url = f"{server_url}/Shows/{item_id}/Seasons?userId={user_id}&Fields=IndexNumber"
-        headers = {"X-Emby-Token": api_key}
+        headers = jellyfin_headers(api_key)
         r = requests.get(url, headers=headers, timeout=5)
         if r.status_code == 200:
             items = r.json().get('Items', [])
@@ -412,7 +429,7 @@ def get_plex_season_count(server_url, rating_key, token):
 def format_jellyfin_item(item, clean_url, api_key, user_id=None):
     # Check for Logo availability
     has_logo = 'Logo' in item.get('ImageTags', {})
-    logo_url = f"{clean_url}/Items/{item['Id']}/Images/Logo?api_key={api_key}" if has_logo else None
+    logo_url = jellyfin_image_url(clean_url, item['Id'], 'Logo', api_key) if has_logo else None
 
     # Default Runtime logic
     ticks = item.get('RunTimeTicks', 0)
@@ -454,7 +471,7 @@ def format_jellyfin_item(item, clean_url, api_key, user_id=None):
         "studios": [s.get('Name') for s in item.get('Studios', [])],
         "provider_ids": item.get('ProviderIds', {}),
         "runtime": runtime_str,
-        "backdrop_url": f"{clean_url}/Items/{item['Id']}/Images/Backdrop?api_key={api_key}",
+        "backdrop_url": jellyfin_image_url(clean_url, item['Id'], 'Backdrop', api_key),
         "logo_url": logo_url,
         "officialRating": item.get('OfficialRating'),
         "inheritedParentalRatingValue": item.get('InheritedParentalRatingValue'),
@@ -466,7 +483,7 @@ def fetch_jellyfin_list(config, filter_mode, filter_val, item_types, limit_count
     jf = config.get('jellyfin', {})
     if not jf.get('url') or not jf.get('api_key'): return []
     
-    headers = {"X-Emby-Token": jf['api_key']}
+    headers = jellyfin_headers(jf['api_key'])
     jf_url = str(jf.get('url', '')).rstrip('/')
     clean_url = jf_url
 
@@ -516,7 +533,7 @@ def fetch_jellyfin_list(config, filter_mode, filter_val, item_types, limit_count
         if genre: c_params.append(f"Genres={genre}")
         if c_params: sort_params += "&" + "&".join(c_params)
 
-    url = f"{clean_url}/Users/{jf['user_id']}/Items?{base_params}{sort_params}"
+    url = f"{jellyfin_items_base(clean_url, jf.get('user_id'))}?{base_params}{sort_params}"
     try:
         r = requests.get(url, headers=headers, timeout=10)
         r.raise_for_status()
@@ -712,8 +729,9 @@ def get_random_media():
     excluded_list = [x.strip() for x in excluded_libs.split(',') if x.strip()]
     
     if jf.get('url') and jf.get('api_key'):
-        headers = {"X-Emby-Token": jf['api_key']}
+        headers = jellyfin_headers(jf['api_key'])
         clean_url = jf['url'].rstrip('/')
+        user_id = resolve_jellyfin_user_id(clean_url, jf['api_key'], jf.get('user_id'))
         
         excluded_paths = []
         if excluded_list:
@@ -727,7 +745,13 @@ def get_random_media():
             except Exception as e:
                 print(f"Error fetching libraries: {e}")
 
-        url = f"{clean_url}/Users/{jf['user_id']}/Items?Recursive=true&IncludeItemTypes=Movie,Series&ExcludeItemTypes=BoxSet&SortBy=Random&Limit=50&Fields=Type,Overview,Genres,CommunityRating,ProductionYear,RunTimeTicks,ImageTags,Path,ProviderIds,OfficialRating,InheritedParentalRatingValue,People"
+        url = (
+            f"{jellyfin_items_base(clean_url, user_id)}"
+            "?Recursive=true&IncludeItemTypes=Movie,Series&ExcludeItemTypes=BoxSet"
+            "&SortBy=Random&Limit=50"
+            "&Fields=Type,Overview,Genres,CommunityRating,ProductionYear,RunTimeTicks,"
+            "ImageTags,Path,ProviderIds,OfficialRating,InheritedParentalRatingValue,People"
+        )
         
         try:
             r = requests.get(url, headers=headers, timeout=5)
@@ -744,7 +768,7 @@ def get_random_media():
             
             if valid_items:
                 item = random.choice(valid_items)
-                return jsonify(format_jellyfin_item(item, clean_url, jf['api_key'], jf['user_id']))
+                return jsonify(format_jellyfin_item(item, clean_url, jf['api_key'], user_id))
         except Exception as e:
             print(f"DEBUG: Jellyfin Error: {e}")
 
@@ -805,9 +829,14 @@ def search_media():
     jf = config.get('jellyfin', {})
     if not jf.get('url') or not jf.get('api_key'): return jsonify([])
     
-    headers = {"X-Emby-Token": jf['api_key']}
+    headers = jellyfin_headers(jf['api_key'])
     clean_url = jf['url'].rstrip('/')
-    url = f"{clean_url}/Users/{jf['user_id']}/Items?Recursive=true&IncludeItemTypes=Movie,Series&ExcludeItemTypes=BoxSet&SearchTerm={query}&Limit=10&Fields=Name,ProductionYear"
+    user_id = resolve_jellyfin_user_id(clean_url, jf['api_key'], jf.get('user_id'))
+    url = (
+        f"{jellyfin_items_base(clean_url, user_id)}"
+        f"?Recursive=true&IncludeItemTypes=Movie,Series&ExcludeItemTypes=BoxSet"
+        f"&SearchTerm={query}&Limit=10&Fields=Name,ProductionYear"
+    )
     
     try:
         r = requests.get(url, headers=headers, timeout=5)
@@ -940,14 +969,26 @@ def get_media_item(item_id):
     if provider == "jellyfin":
         jf = config.get('jellyfin', {})
         if jf.get('url') and jf.get('api_key'):
-            headers = {"X-Emby-Token": jf['api_key']}
+            headers = jellyfin_headers(jf['api_key'])
             clean_url = str(jf.get('url', '')).rstrip('/')
+            user_id = resolve_jellyfin_user_id(clean_url, jf['api_key'], jf.get('user_id'))
 
-            url = f"{clean_url}/Users/{jf['user_id']}/Items/{actual_id}?Fields=Type,Overview,Genres,CommunityRating,ProductionYear,RunTimeTicks,ImageTags,Path,ProviderIds,OfficialRating,InheritedParentalRatingValue,People"
+            if user_id:
+                url = (
+                    f"{clean_url}/Users/{user_id}/Items/{actual_id}"
+                    "?Fields=Type,Overview,Genres,CommunityRating,ProductionYear,RunTimeTicks,"
+                    "ImageTags,Path,ProviderIds,OfficialRating,InheritedParentalRatingValue,People"
+                )
+            else:
+                url = (
+                    f"{clean_url}/Items/{actual_id}"
+                    "?Fields=Type,Overview,Genres,CommunityRating,ProductionYear,RunTimeTicks,"
+                    "ImageTags,Path,ProviderIds,OfficialRating,InheritedParentalRatingValue,People"
+                )
             try:
                 r = requests.get(url, headers=headers, timeout=5)
                 r.raise_for_status()
-                return jsonify(format_jellyfin_item(r.json(), clean_url, jf['api_key'], jf['user_id']))
+                return jsonify(format_jellyfin_item(r.json(), clean_url, jf['api_key'], user_id))
             except Exception as e:
                 return jsonify({"error": str(e)}), 500
                 
@@ -1147,11 +1188,17 @@ def test_jellyfin():
         return jsonify({"status": "error", "message": "URL and API Key required"}), 400
         
     try:
-        headers = {"X-Emby-Token": api_key}
+        headers = jellyfin_headers(api_key)
+        clean = url.rstrip('/')
         # Test connection by fetching system info
-        r = requests.get(f"{url.rstrip('/')}/System/Info", headers=headers, timeout=5)
+        r = requests.get(f"{clean}/System/Info", headers=headers, timeout=5)
         r.raise_for_status()
-        return jsonify({"status": "success", "message": f"Connected: {r.json().get('ServerName')}"})
+        user_id = resolve_jellyfin_user_id(clean, api_key, data.get('user_id'))
+        return jsonify({
+            "status": "success",
+            "message": f"Connected: {r.json().get('ServerName')}",
+            "user_id": user_id,
+        })
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
