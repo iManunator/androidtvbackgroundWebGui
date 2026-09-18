@@ -1,4 +1,4 @@
-CURRENT_VERSION = "1.6.2"
+CURRENT_VERSION = "1.6.3"
 import os
 import sys
 import json
@@ -1890,6 +1890,38 @@ def list_layouts():
         layouts = [n for n in layouts if os.path.isfile(os.path.join(LAYOUTS_DIR, f"{n}.json"))]
     return jsonify(sorted(layouts))
 
+
+@gui_editor_bp.route('/api/layouts/with-images')
+def list_layouts_with_images():
+    """Layout folder names under editor_backgrounds that contain at least one wallpaper JPEG.
+
+    These names come from whatever layout was selected when generating images — not a fixed list.
+    """
+    base_path = os.path.dirname(os.path.abspath(__file__))
+    root = os.path.join(base_path, "editor_backgrounds")
+    result = []
+    if not os.path.isdir(root):
+        return jsonify(result)
+    try:
+        for entry in sorted(os.listdir(root)):
+            path = os.path.join(root, entry)
+            if not os.path.isdir(path):
+                continue
+            has_image = False
+            for dirpath, _, files in os.walk(path):
+                for name in files:
+                    lower = name.lower()
+                    if lower.endswith((".jpg", ".jpeg", ".png")) and ".ambilight" not in lower:
+                        has_image = True
+                        break
+                if has_image:
+                    break
+            if has_image:
+                result.append(entry)
+    except OSError:
+        pass
+    return jsonify(result)
+
 @gui_editor_bp.route('/api/overlays/list')
 def list_overlays():
     if os.path.exists(OVERLAYS_JSON):
@@ -2355,6 +2387,130 @@ def list_layouts_for_app():
             layouts.append({"name": name, "preview_url": preview_url})
     return jsonify(layouts)
 
+def _safe_layout_name(name: str) -> str:
+    return "".join(c for c in (name or "") if c.isalnum() or c in " ._-").strip()
+
+
+def _resolve_layout_dir(base_path: str, layout_name: str):
+    """Return (safe_name, absolute_dir) for editor_backgrounds/<layout>, case-insensitive."""
+    safe = _safe_layout_name(layout_name)
+    root = os.path.join(base_path, "editor_backgrounds")
+    if not safe or not os.path.isdir(root):
+        return safe, os.path.join(root, safe) if safe else None
+    direct = os.path.join(root, safe)
+    if os.path.isdir(direct):
+        return safe, direct
+    want = safe.lower()
+    try:
+        for entry in os.listdir(root):
+            path = os.path.join(root, entry)
+            if os.path.isdir(path) and entry.lower() == want:
+                return entry, path
+    except OSError:
+        pass
+    return safe, direct
+
+
+def _jpg_path_for_cache_entry(entry, layout_dir: str):
+    """Map a metadata cache entry to an on-disk JPEG path, or None if missing."""
+    if not entry or not layout_dir:
+        return None
+    full_path = str(entry.get("path") or "")
+    candidates = []
+    if full_path.lower().endswith(".json"):
+        candidates.append(full_path[:-5] + ".jpg")
+        candidates.append(full_path[:-5] + ".jpeg")
+        candidates.append(full_path[:-5] + ".png")
+    elif full_path:
+        candidates.append(full_path)
+        root, _ = os.path.splitext(full_path)
+        candidates.extend([root + ".jpg", root + ".jpeg", root + ".png"])
+    # Relative filename under layout dir
+    base = os.path.basename(full_path).replace(".json", ".jpg")
+    if base:
+        candidates.append(os.path.join(layout_dir, base))
+    if full_path and layout_dir and full_path.replace("\\", "/").lower().startswith(layout_dir.replace("\\", "/").lower()):
+        rel = os.path.relpath(full_path, layout_dir).replace(".json", ".jpg")
+        candidates.append(os.path.join(layout_dir, rel))
+    for path in candidates:
+        try:
+            if path and os.path.isfile(path):
+                return path
+        except OSError:
+            continue
+    return None
+
+
+def _scan_layout_images(layout_dir: str, layout_name: str):
+    """Build synthetic cache entries from JPEGs on disk when metadata cache is empty/stale."""
+    items = []
+    if not layout_dir or not os.path.isdir(layout_dir):
+        return items
+    for root, _, files in os.walk(layout_dir):
+        for name in files:
+            lower = name.lower()
+            if not lower.endswith((".jpg", ".jpeg", ".png")):
+                continue
+            if ".ambilight" in lower:
+                continue
+            path = os.path.join(root, name)
+            try:
+                mtime = float(os.path.getmtime(path))
+            except OSError:
+                mtime = 0.0
+            title = os.path.splitext(name)[0]
+            # "Title - 2020" → title/year best-effort
+            year = None
+            if " - " in title:
+                maybe_year = title.rsplit(" - ", 1)[-1].strip()
+                if maybe_year.isdigit() and len(maybe_year) == 4:
+                    year = int(maybe_year)
+                    title = title.rsplit(" - ", 1)[0].strip()
+            items.append({
+                "path": path,
+                "layout": layout_name,
+                "genres": "",
+                "officialRating": "",
+                "year": year,
+                "rating": 0.0,
+                "title": title,
+                "action_url": None,
+                "mtime": mtime,
+                "watch_state": "",
+                "library_state": "",
+                "source": "",
+                "source_norm": "",
+                "availability": "",
+            })
+    return items
+
+
+def _wallpaper_public_url(layout_name: str, rel_filename: str):
+    """Stable image URL without 'Layout: ' (colon breaks some Android image loaders)."""
+    return url_for(
+        "gui_editor.get_wallpaper_image",
+        layout=layout_name,
+        filename=rel_filename.replace("\\", "/"),
+        _external=True,
+    )
+
+
+@gui_editor_bp.route('/api/wallpaper/image/<path:layout>/<path:filename>')
+def get_wallpaper_image(layout, filename):
+    """Serve a wallpaper JPEG by layout name (no colon in URL)."""
+    base_path = os.path.dirname(os.path.abspath(__file__))
+    safe_layout, layout_dir = _resolve_layout_dir(base_path, layout)
+    if not layout_dir or not os.path.isdir(layout_dir):
+        return "Layout not found", 404
+    # Prevent path escape
+    abs_file = os.path.normpath(os.path.join(layout_dir, filename))
+    if not abs_file.startswith(os.path.normpath(layout_dir)):
+        return "Invalid path", 400
+    if not os.path.isfile(abs_file):
+        return "File not found", 404
+    return send_file(abs_file)
+
+
 @gui_editor_bp.route('/api/wallpaper/status')
 def get_wallpaper_status():
     # --- Search Engine Logic ---
@@ -2369,8 +2525,8 @@ def get_wallpaper_status():
     pool = (request.args.get('pool') or '').strip().lower()
     exclude_raw = request.args.get('exclude') or request.args.get('exclude_path') or ''
 
-    safe_layout = "".join(c for c in layout_name if c.isalnum() or c in " ._-").strip()
     base_path = os.path.dirname(os.path.abspath(__file__))
+    safe_layout, layout_dir = _resolve_layout_dir(base_path, layout_name)
 
     response = {
         "imageUrl": None,
@@ -2379,21 +2535,41 @@ def get_wallpaper_status():
         "path": None,
         "sort": sort_mode,
         "pool": pool or None,
+        "layout": safe_layout,
     }
 
-    # 1. Collect Candidates from RAM Cache (No Disk I/O)
-    candidates = [img for img in METADATA_CACHE["images"] if img.get('layout') == safe_layout]
-    if not candidates:
+    want = (safe_layout or "").lower()
+    candidates = [
+        img for img in METADATA_CACHE["images"]
+        if str(img.get("layout") or "").strip().lower() == want
+    ]
+
+    # Keep only entries whose JPEG still exists; attach resolved path
+    existing = []
+    for img in candidates:
+        jpg = _jpg_path_for_cache_entry(img, layout_dir)
+        if not jpg:
+            continue
+        entry = dict(img)
+        entry["_jpg"] = jpg
+        if not entry.get("mtime"):
+            entry["mtime"] = _wallpaper_mtime(jpg)
+        if not entry.get("source_norm") and entry.get("source"):
+            entry["source_norm"] = _normalize_source(entry.get("source"))
+        existing.append(entry)
+
+    # Disk fallback when cache is empty or all stale
+    if not existing:
+        existing = []
+        for img in _scan_layout_images(layout_dir, safe_layout):
+            entry = dict(img)
+            entry["_jpg"] = img["path"]
+            existing.append(entry)
+
+    if not existing:
         return jsonify(response)
 
-    # Ensure mtime exists for older cache entries
-    for img in candidates:
-        if not img.get('mtime'):
-            img['mtime'] = _wallpaper_mtime(img.get('path'))
-        if not img.get('source_norm') and img.get('source'):
-            img['source_norm'] = _normalize_source(img.get('source'))
-
-    filtered = list(candidates)
+    filtered = list(existing)
 
     # Pool filters (watch / library / source)
     if pool:
@@ -2413,12 +2589,12 @@ def get_wallpaper_status():
         elif pool in ('available', 'available_seerr'):
             filtered = [c for c in filtered if str(c.get('availability') or '').lower() in ('available', 'available_seerr')]
         elif pool.startswith('source:'):
-            want = pool.split(':', 1)[1].strip().lower()
-            if want in ('seerr', 'jellyseerr'):
-                want = 'jellyseerr'
-            filtered = [c for c in filtered if c.get('source_norm') == want or want in str(c.get('source') or '').lower()]
+            want_src = pool.split(':', 1)[1].strip().lower()
+            if want_src in ('seerr', 'jellyseerr'):
+                want_src = 'jellyseerr'
+            filtered = [c for c in filtered if c.get('source_norm') == want_src or want_src in str(c.get('source') or '').lower()]
         if not filtered:
-            filtered = before_pool  # never blank out pool misses
+            filtered = before_pool
 
     # Rating Filter
     if min_rating_filter or max_rating_filter:
@@ -2453,7 +2629,7 @@ def get_wallpaper_status():
     exclude_tokens = [t.strip().replace('\\', '/').lower() for t in exclude_raw.split(',') if t.strip()]
     if exclude_tokens and len(filtered) > 1:
         def _is_excluded(entry):
-            path = str(entry.get('path') or '').replace('\\', '/').lower()
+            path = str(entry.get('_jpg') or entry.get('path') or '').replace('\\', '/').lower()
             base = os.path.basename(path).lower()
             stem = os.path.splitext(base)[0]
             for token in exclude_tokens:
@@ -2464,9 +2640,8 @@ def get_wallpaper_status():
         if narrowed:
             filtered = narrowed
 
-    # Fallback if filter too strict
-    if not filtered and candidates:
-        filtered = candidates
+    if not filtered and existing:
+        filtered = existing
     elif not filtered:
         return jsonify(response)
 
@@ -2490,26 +2665,21 @@ def get_wallpaper_status():
     elif sort_mode in ('oldest', 'mtime_asc'):
         filtered.sort(key=lambda x: float(x.get('mtime', 0) or 0))
         selected = filtered[0]
-    else:  # random
+    else:
         selected = random.choice(filtered)
 
-    # 4. Construct Response
+    # 4. Construct Response — only for a file that exists
     if selected:
-        full_path = selected['path']
-        filename = os.path.basename(full_path).replace('.json', '.jpg')
-
-        layout_dir = os.path.join(base_path, 'editor_backgrounds', safe_layout)
-        if full_path.startswith(layout_dir):
-            rel_path = os.path.relpath(full_path, layout_dir)
-            filename = rel_path.replace('.json', '.jpg').replace('\\', '/')
-
-        folder_param = f"Layout: {safe_layout}"
-        response["imageUrl"] = url_for('gui_editor.get_gallery_image', folder=folder_param, filename=filename, _external=True)
-        response["actionUrl"] = selected.get("action_url")
-        response["title"] = selected.get("title")
-        response["path"] = filename
+        jpg = selected.get("_jpg") or _jpg_path_for_cache_entry(selected, layout_dir)
+        if jpg and os.path.isfile(jpg) and layout_dir:
+            rel = os.path.relpath(jpg, layout_dir).replace("\\", "/")
+            response["imageUrl"] = _wallpaper_public_url(safe_layout, rel)
+            response["actionUrl"] = selected.get("action_url")
+            response["title"] = selected.get("title")
+            response["path"] = rel
 
     return jsonify(response)
+
 
 @gui_editor_bp.route('/api/current-background')
 def get_current_background():
