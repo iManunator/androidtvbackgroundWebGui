@@ -498,7 +498,8 @@
             gap: 5px;
         }
 
-        .btn-seerr-logo-toggle {
+        .btn-seerr-logo-toggle,
+        .btn-jellyfin-logo-toggle {
             display: none;
             align-items: center;
             gap: 7px;
@@ -520,7 +521,14 @@
             border-color: rgba(94, 186, 201, 0.55);
         }
 
-        .btn-seerr-logo-toggle img {
+        .btn-jellyfin-logo-toggle.active {
+            opacity: 1;
+            background: #1a2e24;
+            border-color: rgba(0, 164, 220, 0.55);
+        }
+
+        .btn-seerr-logo-toggle img,
+        .btn-jellyfin-logo-toggle img {
             width: 18px;
             height: 18px;
             object-fit: contain;
@@ -1255,7 +1263,7 @@
                             <select id="shuffleProvider"
                                 style="padding: 8px 10px; border-radius: 4px; border: 1px solid #555; background: #333; color: white; cursor: pointer;"
                                 title="Shuffle source"
-                                onchange="try{localStorage.setItem('tvb_shuffle_provider', this.value);}catch(e){} updateSeerrLogoToggleUi();">
+                                onchange="try{localStorage.setItem('tvb_shuffle_provider', this.value);}catch(e){} updateProviderLogoToggleUi();">
                                 <option value="jellyfin">Jellyfin</option>
                                 <option value="jellyseerr">Seerr</option>
                                 <option value="plex">Plex</option>
@@ -1268,6 +1276,11 @@
                                 type="button" aria-pressed="true" title="Toggle Seerr logo on wallpaper">
                                 <img src="/static/provider_logos/seerrlogo.png" alt="" aria-hidden="true">
                                 <span>Seerr logo</span>
+                            </button>
+                            <button id="btn-toggle-jellyfin-logo" class="btn-jellyfin-logo-toggle" onclick="toggleJellyfinLogo()"
+                                type="button" aria-pressed="true" title="Toggle Jellyfin logo on wallpaper">
+                                <img src="/static/provider_logos/jellyfinlogo.png" alt="" aria-hidden="true">
+                                <span>Jellyfin logo</span>
                             </button>
                             <span id="source-indicator"
                                 style="font-size: 11px; color: #aaa; text-shadow: 1px 1px 2px black;">Source:

@@ -1461,11 +1461,12 @@ function getCertificationFilename(rating) {
         const objsToRemove = canvas.getObjects().filter(o => o.dataTag === 'fade_effect' || o.dataTag === 'separator' || o.dataTag === 'row_separator');
         objsToRemove.forEach(o => canvas.remove(o));
 
-        // Auto-mark Seerr titles that are not in the library
+        // Auto-mark Seerr (not in library) or Jellyfin (in library) titles
         const seerrSrc = String(data.source || '');
         const isSeerr = String(data.id || '').startsWith('jellyseerr-') || !!data.seerr_url || seerrSrc.startsWith('Seerr') || seerrSrc === 'Jellyseerr';
         const seerrNotInLibrary = isSeerr && data.availability !== 'available' && data.availability !== 'partial';
-        if (seerrNotInLibrary && !canvas.getObjects().some(o => o.dataTag === 'provider_source')) {
+        const isJellyfin = !isSeerr && seerrSrc === 'Jellyfin';
+        if ((seerrNotInLibrary || isJellyfin) && !canvas.getObjects().some(o => o.dataTag === 'provider_source')) {
             const marginLeft = 50;
             const elements = canvas.getObjects().filter(o => o.dataTag && o.dataTag !== 'background' && o.dataTag !== 'fade_effect' && o.dataTag !== 'ambilight_bg');
             let left = marginLeft;
@@ -1645,14 +1646,19 @@ function getCertificationFilename(rating) {
                     } else if (source && (String(source).startsWith('Seerr') || source === 'Jellyseerr')) {
                         providerText = "";
                         providerLogo = "seerrlogo.png";
+                    } else if (source === 'Plex') {
+                        providerText = "Now available on ";
+                        providerLogo = "plexlogo.png";
+                    } else if (source === 'Jellyfin') {
+                        providerText = "";
+                        providerLogo = "jellyfinlogo.png";
                     } else if (['Sonarr', 'Radarr', 'Jellyseerr'].includes(source) || (source && source.includes('Missing'))) {
                         providerText = (source && source.includes('Missing')) ? "Requested on " : "Soon available on ";
                         providerLogo = "jellyfinlogo.png";
                     } else {
                         // Default fallback
                         providerText = "Now available on ";
-                        if (source === 'Plex') providerLogo = "plexlogo.png";
-                        else providerLogo = "jellyfinlogo.png";
+                        providerLogo = "jellyfinlogo.png";
                     }
 
                     if (providerLogo) {
@@ -1681,9 +1687,9 @@ function getCertificationFilename(rating) {
                                             currentSize = obj.getScaledHeight() || currentSize;
                                         }
 
-                                        // Logo-only (Seerr) — preserve saved slot size
+                                        // Logo-only (Seerr / Jellyfin) — preserve saved slot size
                                         if (!providerText) {
-                                            if (obj.type === 'image' && obj.dataTag === 'provider_source') {
+                                            if (obj.type === 'image' && obj.dataTag === 'provider_source' && obj.providerLogoFile === providerLogo) {
                                                 if (!obj.slotHeight) obj.slotHeight = obj.getScaledHeight();
                                                 if (!obj.slotWidth) obj.slotWidth = obj.getScaledWidth();
                                                 obj.set('visible', true);
@@ -1700,6 +1706,7 @@ function getCertificationFilename(rating) {
                                                 opacity: obj.opacity,
                                                 angle: obj.angle,
                                                 dataTag: 'provider_source',
+                                                providerLogoFile: providerLogo,
                                                 slotWidth: obj.slotWidth || img.getScaledWidth(),
                                                 slotHeight: targetH,
                                                 selectable: false
@@ -2240,7 +2247,7 @@ function getCertificationFilename(rating) {
         console.log("Generating JSON output...");
 
         let jsonOutput;
-        const propertiesToInclude = ['dataTag', 'fullMediaText', 'selectable', 'evented', 'lockScalingY', 'splitByGrapheme', 'fixedHeight', 'editable', 'matchHeight', 'autoBackgroundColor', 'textureId', 'textureScale', 'textureRotation', 'textureOpacity', 'logoAutoFix', 'crossOrigin', 'clipPath', 'maxItems', 'fullList', 'slotWidth', 'slotHeight'];
+        const propertiesToInclude = ['dataTag', 'fullMediaText', 'selectable', 'evented', 'lockScalingY', 'splitByGrapheme', 'fixedHeight', 'editable', 'matchHeight', 'autoBackgroundColor', 'textureId', 'textureScale', 'textureRotation', 'textureOpacity', 'logoAutoFix', 'crossOrigin', 'clipPath', 'maxItems', 'fullList', 'slotWidth', 'slotHeight', 'providerLogoFile'];
 
         // Apply Max Items Limit to Actors/Directors before JSON generation
         canvas.getObjects().forEach(obj => {

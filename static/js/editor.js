@@ -1091,7 +1091,7 @@ async function fetchMediaData(itemId = null) {
         }
 
         await autoDetectBgColor(true, true);
-        ensureSeerrProviderBadge(data);
+        ensureProviderLogoBadge(data);
         await previewTemplate(data, true, newLogoImg);
         saveToLocalStorage();
         canvas.renderAll(); // Force synchronous render to ensure image is ready
@@ -1107,7 +1107,7 @@ async function fetchMediaData(itemId = null) {
         if (btnSaveGallery) btnSaveGallery.disabled = false;
 
         if (!isBatchRunning) indicator.innerText = "Source: " + data.source;
-        updateSeerrLogoToggleUi();
+        updateProviderLogoToggleUi();
     } catch (err) { console.error(err); indicator.innerText = "Error loading preview"; }
     finally {
         btn.disabled = false;
@@ -1120,6 +1120,12 @@ function isSeerrMedia(data) {
     const id = String(data.id || '');
     const src = String(data.source || '');
     return id.startsWith('jellyseerr-') || id.startsWith('seerr-') || !!data.seerr_url || src.startsWith('Seerr') || src === 'Jellyseerr';
+}
+
+function isJellyfinMedia(data) {
+    if (!data || isSeerrMedia(data)) return false;
+    const src = String(data.source || '');
+    return src === 'Jellyfin';
 }
 
 function isSeerrLogoEnabled() {
@@ -1135,6 +1141,19 @@ function setSeerrLogoEnabled(on) {
     try { localStorage.setItem('tvb_seerr_logo_visible', on ? '1' : '0'); } catch (e) {}
 }
 
+function isJellyfinLogoEnabled() {
+    try {
+        const v = localStorage.getItem('tvb_jellyfin_logo_visible');
+        return v === null ? true : (v === '1' || v === 'true');
+    } catch (e) {
+        return true;
+    }
+}
+
+function setJellyfinLogoEnabled(on) {
+    try { localStorage.setItem('tvb_jellyfin_logo_visible', on ? '1' : '0'); } catch (e) {}
+}
+
 function shouldShowSeerrBadge(data) {
     if (!isSeerrMedia(data)) return false;
     const avail = data.availability;
@@ -1142,23 +1161,15 @@ function shouldShowSeerrBadge(data) {
     return avail !== 'available' && avail !== 'partial';
 }
 
-function ensureSeerrProviderBadge(data) {
-    if (!canvas || !shouldShowSeerrBadge(data)) return false;
-    const existing = canvas.getObjects().find(o => o.dataTag === 'provider_source');
-    if (!isSeerrLogoEnabled()) {
-        if (existing) existing.set('visible', false);
-        return false;
-    }
-    if (existing) {
-        existing.set('visible', true);
-        return false;
-    }
+function shouldShowJellyfinBadge(data) {
+    return isJellyfinMedia(data);
+}
 
-    // Place under title / lowest metadata row so it reads as part of the wallpaper
+function placeProviderLogoPlaceholder() {
     const is4K = document.getElementById('resSelect') && document.getElementById('resSelect').value === '2160';
     const fontSize = is4K ? 48 : 32;
     const marginLeft = parseInt(document.getElementById('marginLeftInput')?.value) || 50;
-    const elements = canvas.getObjects().filter(o => o.dataTag && o !== mainBg && o.visible && o.dataTag !== 'background' && o.dataTag !== 'fade_effect' && o.dataTag !== 'ambilight_bg');
+    const elements = canvas.getObjects().filter(o => o.dataTag && o !== mainBg && o.visible && o.dataTag !== 'background' && o.dataTag !== 'fade_effect' && o.dataTag !== 'ambilight_bg' && o.dataTag !== 'provider_source');
     let left = marginLeft;
     let top = (canvas.height || 1080) * 0.82;
     const title = elements.find(o => o.dataTag === 'title');
@@ -1186,6 +1197,45 @@ function ensureSeerrProviderBadge(data) {
     return true;
 }
 
+function ensureSeerrProviderBadge(data) {
+    if (!canvas || !shouldShowSeerrBadge(data)) return false;
+    const existing = canvas.getObjects().find(o => o.dataTag === 'provider_source');
+    if (!isSeerrLogoEnabled()) {
+        if (existing) existing.set('visible', false);
+        return false;
+    }
+    if (existing) {
+        existing.set('visible', true);
+        return false;
+    }
+    return placeProviderLogoPlaceholder();
+}
+
+function ensureJellyfinProviderBadge(data) {
+    if (!canvas || !shouldShowJellyfinBadge(data)) return false;
+    const existing = canvas.getObjects().find(o => o.dataTag === 'provider_source');
+    if (!isJellyfinLogoEnabled()) {
+        if (existing) existing.set('visible', false);
+        return false;
+    }
+    if (existing) {
+        existing.set('visible', true);
+        return false;
+    }
+    return placeProviderLogoPlaceholder();
+}
+
+function ensureProviderLogoBadge(data) {
+    if (shouldShowSeerrBadge(data)) return ensureSeerrProviderBadge(data);
+    if (shouldShowJellyfinBadge(data)) return ensureJellyfinProviderBadge(data);
+    return false;
+}
+
+function updateProviderLogoToggleUi() {
+    updateSeerrLogoToggleUi();
+    updateJellyfinLogoToggleUi();
+}
+
 function updateSeerrLogoToggleUi() {
     const btn = document.getElementById('btn-toggle-seerr-logo');
     if (!btn) return;
@@ -1198,11 +1248,23 @@ function updateSeerrLogoToggleUi() {
     btn.title = on ? 'Hide Seerr logo on wallpaper' : 'Show Seerr logo on wallpaper';
 }
 
+function updateJellyfinLogoToggleUi() {
+    const btn = document.getElementById('btn-toggle-jellyfin-logo');
+    if (!btn) return;
+    const shuffleSel = document.getElementById('shuffleProvider');
+    const show = isJellyfinMedia(lastFetchedData) || (shuffleSel && shuffleSel.value === 'jellyfin');
+    btn.style.display = show ? 'inline-flex' : 'none';
+    const on = isJellyfinLogoEnabled();
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.title = on ? 'Hide Jellyfin logo on wallpaper' : 'Show Jellyfin logo on wallpaper';
+}
+
 function toggleSeerrLogo() {
     const next = !isSeerrLogoEnabled();
     setSeerrLogoEnabled(next);
     if (!canvas) {
-        updateSeerrLogoToggleUi();
+        updateProviderLogoToggleUi();
         return;
     }
     const badge = canvas.getObjects().find(o => o.dataTag === 'provider_source');
@@ -1220,7 +1282,32 @@ function toggleSeerrLogo() {
     }
     canvas.requestRenderAll();
     saveToLocalStorage();
-    updateSeerrLogoToggleUi();
+    updateProviderLogoToggleUi();
+}
+
+function toggleJellyfinLogo() {
+    const next = !isJellyfinLogoEnabled();
+    setJellyfinLogoEnabled(next);
+    if (!canvas) {
+        updateProviderLogoToggleUi();
+        return;
+    }
+    const badge = canvas.getObjects().find(o => o.dataTag === 'provider_source');
+    if (next) {
+        if (shouldShowJellyfinBadge(lastFetchedData)) {
+            const added = ensureJellyfinProviderBadge(lastFetchedData);
+            if (added || badge) previewTemplate(lastFetchedData);
+            const b = canvas.getObjects().find(o => o.dataTag === 'provider_source');
+            if (b) b.set('visible', true);
+        } else if (badge) {
+            badge.set('visible', true);
+        }
+    } else if (badge) {
+        badge.set('visible', false);
+    }
+    canvas.requestRenderAll();
+    saveToLocalStorage();
+    updateProviderLogoToggleUi();
 }
 
 function addSeerrAvailabilityBadge() {
@@ -1231,7 +1318,7 @@ function addSeerrAvailabilityBadge() {
     } else if (shouldShowSeerrBadge(lastFetchedData)) {
         previewTemplate(lastFetchedData);
     }
-    updateSeerrLogoToggleUi();
+    updateProviderLogoToggleUi();
 }
 
 function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
@@ -1473,13 +1560,19 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                             // Logo-only Seerr mark (no status text)
                             pText = "";
                             pLogo = "seerrlogo.png";
+                        } else if (srcVal === 'Plex') {
+                            pText = "Now available on ";
+                            pLogo = "plexlogo.png";
+                        } else if (srcVal === 'Jellyfin' || isJellyfinMedia(mediaData)) {
+                            // Logo-only Jellyfin mark (in library)
+                            pText = "";
+                            pLogo = "jellyfinlogo.png";
                         } else if (['Sonarr', 'Radarr', 'Jellyseerr'].includes(srcVal) || (srcVal && srcVal.includes('Missing'))) {
                             pText = (srcVal && srcVal.includes('Missing')) ? "Requested on " : "Soon available on ";
                             pLogo = "jellyfinlogo.png";
                         } else {
                             pText = "Now available on ";
-                            if (srcVal === 'Plex') pLogo = "plexlogo.png";
-                            else pLogo = "jellyfinlogo.png";
+                            pLogo = "jellyfinlogo.png";
                         }
 
                         if (pLogo) {
@@ -1517,16 +1610,16 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                                         }
                                     }
 
-                                    // Logo-only badge (e.g. Seerr) — keep user size across shuffles/saves
+                                    // Logo-only badge (Seerr / Jellyfin) — keep user size across shuffles/saves
                                     if (!pText) {
-                                        if (obj.type === 'image' && obj.dataTag === 'provider_source') {
+                                        if (obj.type === 'image' && obj.dataTag === 'provider_source' && obj.providerLogoFile === pLogo) {
                                             if (!obj.slotHeight) obj.slotHeight = obj.getScaledHeight();
                                             if (!obj.slotWidth) obj.slotWidth = obj.getScaledWidth();
                                             obj.set('visible', true);
                                             resolve();
                                             return;
                                         }
-                                        const targetH = obj.slotHeight || obj.getScaledHeight() || ((currentProps.fontSize || 40) * 1.35);
+                                        const targetH = obj.slotHeight || (obj.type === 'image' ? obj.getScaledHeight() : null) || ((currentProps.fontSize || 40) * 1.35);
                                         img.scaleToHeight(targetH);
                                         img.set({
                                             left: obj.left,
@@ -1536,6 +1629,7 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                                             opacity: obj.opacity,
                                             angle: obj.angle,
                                             dataTag: 'provider_source',
+                                            providerLogoFile: pLogo,
                                             slotWidth: obj.slotWidth || img.getScaledWidth(),
                                             slotHeight: targetH,
                                             selectable: true
@@ -3260,7 +3354,7 @@ function init() {
             }
         } catch (e) {}
     }
-    updateSeerrLogoToggleUi();
+    updateProviderLogoToggleUi();
 
     // Set initial mobile title
     const activeLink = document.querySelector('.tab-link.active');
@@ -3321,7 +3415,7 @@ function jumpToHistory(index) {
 function saveHistory(force = false) {
     if (isUndoRedoProcessing || !canvas) return;
 
-    const json = canvas.toJSON(['dataTag', 'fullMediaText', 'selectable', 'evented', 'lockScalingY', 'splitByGrapheme', 'fixedHeight', 'editable', 'matchHeight', 'autoBackgroundColor', 'textureId', 'textureScale', 'textureRotation', 'textureOpacity', 'snapToObjects', 'logoAutoFix', 'maxItems', 'fullList', 'slotWidth', 'slotHeight']);
+    const json = canvas.toJSON(['dataTag', 'fullMediaText', 'selectable', 'evented', 'lockScalingY', 'splitByGrapheme', 'fixedHeight', 'editable', 'matchHeight', 'autoBackgroundColor', 'textureId', 'textureScale', 'textureRotation', 'textureOpacity', 'snapToObjects', 'logoAutoFix', 'maxItems', 'fullList', 'slotWidth', 'slotHeight', 'providerLogoFile']);
 
     // Filter out fade effects and grid lines (same as saveToLocalStorage)
     json.objects = json.objects.filter(o => o.dataTag !== 'fade_effect' && o.dataTag !== 'grid_line' && o.dataTag !== 'guide_overlay' && o.dataTag !== 'guide' && o.dataTag !== 'ambilight_bg' && o.dataTag !== 'separator' && o.dataTag !== 'row_separator');
@@ -4842,7 +4936,7 @@ async function saveLayout() {
     btn.innerText = "Saving Layout...";
     setUIInteraction(false);
 
-    const layout = canvas.toJSON(['dataTag', 'fullMediaText', 'selectable', 'evented', 'lockScalingY', 'splitByGrapheme', 'fixedHeight', 'editable', 'matchHeight', 'autoBackgroundColor', 'textureId', 'textureScale', 'textureRotation', 'textureOpacity', 'snapToObjects', 'logoAutoFix', 'maxItems', 'fullList', 'slotWidth', 'slotHeight']);
+    const layout = canvas.toJSON(['dataTag', 'fullMediaText', 'selectable', 'evented', 'lockScalingY', 'splitByGrapheme', 'fixedHeight', 'editable', 'matchHeight', 'autoBackgroundColor', 'textureId', 'textureScale', 'textureRotation', 'textureOpacity', 'snapToObjects', 'logoAutoFix', 'maxItems', 'fullList', 'slotWidth', 'slotHeight', 'providerLogoFile']);
 
     // Filter out fade effects and grid lines BEFORE saving
     layout.objects = layout.objects.filter(o => o.dataTag !== 'fade_effect' && o.dataTag !== 'grid_line' && o.dataTag !== 'guide_overlay' && o.dataTag !== 'ambilight_bg' && o.dataTag !== 'separator' && o.dataTag !== 'row_separator');
@@ -5182,7 +5276,7 @@ function saveToLocalStorage() {
 
 function performSaveToLocalStorage() {
     if (!canvas) return;
-    const json = canvas.toJSON(['dataTag', 'fullMediaText', 'selectable', 'evented', 'lockScalingY', 'splitByGrapheme', 'fixedHeight', 'editable', 'matchHeight', 'autoBackgroundColor', 'textureId', 'textureScale', 'textureRotation', 'textureOpacity', 'snapToObjects', 'logoAutoFix', 'maxItems', 'fullList', 'slotWidth', 'slotHeight']);
+    const json = canvas.toJSON(['dataTag', 'fullMediaText', 'selectable', 'evented', 'lockScalingY', 'splitByGrapheme', 'fixedHeight', 'editable', 'matchHeight', 'autoBackgroundColor', 'textureId', 'textureScale', 'textureRotation', 'textureOpacity', 'snapToObjects', 'logoAutoFix', 'maxItems', 'fullList', 'slotWidth', 'slotHeight', 'providerLogoFile']);
     // Filter out fade effects so they aren't saved as static objects
     json.objects = json.objects.filter(o => o.dataTag !== 'fade_effect' && o.dataTag !== 'grid_line' && o.dataTag !== 'guide_overlay' && o.dataTag !== 'separator' && o.dataTag !== 'row_separator');
     // Filter out ambilight background (it is auto-generated)
