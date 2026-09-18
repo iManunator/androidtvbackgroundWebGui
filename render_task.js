@@ -1681,9 +1681,17 @@ function getCertificationFilename(rating) {
                                             currentSize = obj.getScaledHeight() || currentSize;
                                         }
 
-                                        // Logo-only (Seerr)
+                                        // Logo-only (Seerr) — preserve saved slot size
                                         if (!providerText) {
-                                            img.scaleToHeight(currentSize * 1.35);
+                                            if (obj.type === 'image' && obj.dataTag === 'provider_source') {
+                                                if (!obj.slotHeight) obj.slotHeight = obj.getScaledHeight();
+                                                if (!obj.slotWidth) obj.slotWidth = obj.getScaledWidth();
+                                                obj.set('visible', true);
+                                                resolve();
+                                                return;
+                                            }
+                                            const targetH = obj.slotHeight || obj.getScaledHeight() || (currentSize * 1.35);
+                                            img.scaleToHeight(targetH);
                                             img.set({
                                                 left: obj.left,
                                                 top: obj.top,
@@ -1692,6 +1700,8 @@ function getCertificationFilename(rating) {
                                                 opacity: obj.opacity,
                                                 angle: obj.angle,
                                                 dataTag: 'provider_source',
+                                                slotWidth: obj.slotWidth || img.getScaledWidth(),
+                                                slotHeight: targetH,
                                                 selectable: false
                                             });
                                             canvas.remove(obj);

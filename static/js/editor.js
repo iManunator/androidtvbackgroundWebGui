@@ -275,7 +275,7 @@ function updateSelectionUI(e) {
 
     if (activeObj === mainBg) {
         expandGroup('group-canvas');
-    } else if (activeObj && (activeObj.type === 'image' && (activeObj.dataTag === 'icon' || activeObj.dataTag === 'certification' || activeObj.dataTag === 'title'))) {
+    } else if (activeObj && (activeObj.type === 'image' && (activeObj.dataTag === 'icon' || activeObj.dataTag === 'certification' || activeObj.dataTag === 'title' || activeObj.dataTag === 'provider_source'))) {
         expandGroup('group-logos');
     }
 
@@ -291,16 +291,16 @@ function updateSelectionUI(e) {
     if (resetSnapText) resetSnapText.style.display = isSnapEnabled ? 'none' : 'block';
     if (resetSnapIcon) resetSnapIcon.style.display = isSnapEnabled ? 'none' : 'block';
 
-    if (activeObj.type === 'image' && (activeObj.dataTag === 'icon' || activeObj.dataTag === 'certification' || activeObj.dataTag === 'title')) {
+    if (activeObj.type === 'image' && (activeObj.dataTag === 'icon' || activeObj.dataTag === 'certification' || activeObj.dataTag === 'title' || activeObj.dataTag === 'provider_source')) {
         if (iconPanel) {
             iconPanel.style.display = 'block';
-            document.getElementById('iconSizeInput').value = Math.round(activeObj.getScaledHeight());
+            document.getElementById('iconSizeInput').value = Math.round(activeObj.slotHeight || activeObj.getScaledHeight());
             const isMatchHeight = activeObj.matchHeight || false;
             document.getElementById('matchHeightToggle').checked = isMatchHeight;
             document.getElementById('iconSizeInput').disabled = isMatchHeight;
         }
         if (logoSettings) {
-            logoSettings.style.display = 'block';
+            logoSettings.style.display = (activeObj.dataTag === 'title') ? 'block' : 'none';
             const autoFix = document.getElementById('logoAutoFixToggle');
             if (autoFix) autoFix.checked = activeObj.logoAutoFix !== false;
 
@@ -516,6 +516,10 @@ function updateIconSize() {
     if (activeObj && activeObj.type === 'image') {
         const newSize = parseInt(document.getElementById('iconSizeInput').value);
         activeObj.scaleToHeight(newSize);
+        if (activeObj.dataTag === 'provider_source' || activeObj.dataTag === 'title') {
+            activeObj.slotHeight = activeObj.getScaledHeight();
+            activeObj.slotWidth = activeObj.getScaledWidth();
+        }
         activeObj.setCoords();
         updateVerticalLayout();
         canvas.requestRenderAll();
@@ -1456,9 +1460,16 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                                         }
                                     }
 
-                                    // Logo-only badge (e.g. Seerr)
+                                    // Logo-only badge (e.g. Seerr) — keep user size across shuffles/saves
                                     if (!pText) {
-                                        const targetH = (currentProps.fontSize || 40) * 1.35;
+                                        if (obj.type === 'image' && obj.dataTag === 'provider_source') {
+                                            if (!obj.slotHeight) obj.slotHeight = obj.getScaledHeight();
+                                            if (!obj.slotWidth) obj.slotWidth = obj.getScaledWidth();
+                                            obj.set('visible', true);
+                                            resolve();
+                                            return;
+                                        }
+                                        const targetH = obj.slotHeight || obj.getScaledHeight() || ((currentProps.fontSize || 40) * 1.35);
                                         img.scaleToHeight(targetH);
                                         img.set({
                                             left: obj.left,
@@ -1468,6 +1479,8 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                                             opacity: obj.opacity,
                                             angle: obj.angle,
                                             dataTag: 'provider_source',
+                                            slotWidth: obj.slotWidth || img.getScaledWidth(),
+                                            slotHeight: targetH,
                                             selectable: true
                                         });
                                         canvas.remove(obj);
@@ -3035,7 +3048,12 @@ function init() {
     canvas.on('selection:updated', updateSelectionUI);
     canvas.on('selection:cleared', updateSelectionUI);
 
-    canvas.on('object:modified', () => {
+    canvas.on('object:modified', (e) => {
+        const obj = e && e.target;
+        if (obj && obj.type === 'image' && (obj.dataTag === 'provider_source' || obj.dataTag === 'title')) {
+            obj.slotHeight = obj.getScaledHeight();
+            obj.slotWidth = obj.getScaledWidth();
+        }
         updateVerticalLayout();
         saveToLocalStorage();
     });
