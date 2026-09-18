@@ -1627,7 +1627,7 @@ function getCertificationFilename(rating) {
                     let wLabel = data.watch_status || null;
                     if (!wLabel || !String(wLabel).trim()) {
                         wLabel = wState === 'watched' ? 'Watched'
-                            : (wState === 'partially_watched' ? 'In progress' : 'Unwatched');
+                            : (wState === 'partially_watched' ? 'Partly watched' : 'Unwatched');
                     }
                     let wFile = 'watch_unwatched.svg';
                     if (wState === 'watched' || /^(watched)$/i.test(String(wLabel))) wFile = 'watch_watched.svg';

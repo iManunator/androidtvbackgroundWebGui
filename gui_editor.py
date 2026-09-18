@@ -1,4 +1,4 @@
-CURRENT_VERSION = "1.5.5"
+CURRENT_VERSION = "1.5.10"
 import os
 import sys
 import json
@@ -14,7 +14,7 @@ import uuid
 import threading
 import subprocess
 from datetime import datetime, timedelta
-from flask import Blueprint, render_template, request, jsonify, send_from_directory, url_for, send_file
+from flask import Blueprint, render_template, request, jsonify, send_from_directory, url_for, send_file, Response
 from PIL import Image
 from urllib.parse import quote
 
@@ -628,7 +628,7 @@ def format_jellyfin_item(item, clean_url, api_key, user_id=None, config=None):
         p.get('Name') for p in people if p.get('Type') == 'Writer'
     ))
 
-    status = media_status.jellyfin_status_fields(item)
+    status = media_status.jellyfin_status_fields(item, config)
     tmdb_id = _jellyfin_tmdb_id(item)
     payload = {
         "id": item.get('Id'),
@@ -1119,7 +1119,7 @@ def get_random_media():
             "?Recursive=true&IncludeItemTypes=Movie,Series&ExcludeItemTypes=BoxSet"
             "&SortBy=Random&Limit=50"
             "&Fields=Type,Overview,Genres,CommunityRating,ProductionYear,RunTimeTicks,"
-            "ImageTags,Path,ProviderIds,OfficialRating,InheritedParentalRatingValue,People,UserData"
+            "ImageTags,Path,ProviderIds,OfficialRating,InheritedParentalRatingValue,People,UserData,RecursiveItemCount"
         )
         
         try:
@@ -1431,13 +1431,13 @@ def get_media_item(item_id):
                 url = (
                     f"{clean_url}/Users/{user_id}/Items/{actual_id}"
                     "?Fields=Type,Overview,Genres,CommunityRating,ProductionYear,RunTimeTicks,"
-                    "ImageTags,Path,ProviderIds,OfficialRating,InheritedParentalRatingValue,People,UserData"
+                    "ImageTags,Path,ProviderIds,OfficialRating,InheritedParentalRatingValue,People,UserData,RecursiveItemCount"
                 )
             else:
                 url = (
                     f"{clean_url}/Items/{actual_id}"
                     "?Fields=Type,Overview,Genres,CommunityRating,ProductionYear,RunTimeTicks,"
-                    "ImageTags,Path,ProviderIds,OfficialRating,InheritedParentalRatingValue,People,UserData"
+                    "ImageTags,Path,ProviderIds,OfficialRating,InheritedParentalRatingValue,People,UserData,RecursiveItemCount"
                 )
             try:
                 r = requests.get(url, headers=headers, timeout=5)
@@ -2193,72 +2193,97 @@ def get_custom_icon_image(filename):
 
 @gui_editor_bp.route('/api/layouts/save', methods=['POST'])
 def save_layout():
-    data = request.json
-    name = data.get('name')
-    layout = data.get('layout')
-    preview_image = data.get('preview_image')
-    action_url = data.get('action_url')
-    media_title = data.get('media_title')
-    metadata = data.get('metadata')
-    if not name or not layout:
-        return jsonify({"status": "error", "message": "Missing name or layout data"}), 400
-    
-    safe_name = "".join(c for c in name if c.isalnum() or c in " ._-").strip()
-    if not safe_name: return jsonify({"status": "error", "message": "Invalid name"}), 400
+    try:
+        data = request.json or {}
+        name = data.get('name')
+        layout = data.get('layout')
+        preview_image = data.get('preview_image')
+        action_url = data.get('action_url')
+        media_title = data.get('media_title')
+        metadata = data.get('metadata')
+        if not name or not layout:
+            return jsonify({"status": "error", "message": "Missing name or layout data"}), 400
 
-    path = os.path.join(LAYOUTS_DIR, f"{safe_name}.json")
-    
-    if metadata:
-        layout['metadata'] = metadata
+        safe_name = "".join(c for c in str(name) if c.isalnum() or c in " ._-").strip()
+        if not safe_name:
+            return jsonify({"status": "error", "message": "Invalid name"}), 400
 
-    with open(path, 'w') as f:
-        json.dump(layout, f)
-    
-    # Clear existing previews for this layout to avoid mixing old and new images
-    preview_dir_path = os.path.join(LAYOUT_PREVIEWS_DIR, safe_name)
-    if os.path.exists(preview_dir_path):
-        shutil.rmtree(preview_dir_path)
-    
-    # Save Preview Image (Thumbnail)
-    if preview_image:
-        if ',' in preview_image:
-            preview_image = preview_image.split(',')[1]
-        try:
-            preview_path = os.path.join(LAYOUT_PREVIEWS_DIR, f"{safe_name}.jpg")
-            with open(preview_path, "wb") as f:
-                f.write(base64.b64decode(preview_image))
-        except Exception as e:
-            print(f"Error saving layout preview: {e}")
-            
-    # Save status.json for Android App Deep Link
-    bg_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'editor_backgrounds', safe_name)
-    if not os.path.exists(bg_dir):
-        os.makedirs(bg_dir)
-        
-    status_data = {
-        "action_url": action_url,
-        "title": media_title,
-        "timestamp": int(time.time())
-    }
-    with open(os.path.join(bg_dir, 'status.json'), 'w') as f:
-        json.dump(status_data, f)
+        if not isinstance(layout, dict):
+            return jsonify({"status": "error", "message": "Invalid layout data"}), 400
 
-    return jsonify({"status": "success"})
+        # Custom names must not stay "managed" or later seed upgrades can treat them oddly
+        if safe_name not in MANAGED_LAYOUT_NAMES:
+            layout.pop("managed_preset", None)
+            layout.pop("layout_preset_version", None)
+            layout["preset_name"] = safe_name
+            layout["layout_anchor"] = layout.get("layout_anchor") or "left_top"
+        else:
+            # Editing a shipped preset in place — keep managed markers so upgrades can refresh
+            layout["managed_preset"] = True
+            layout["preset_name"] = safe_name
 
-@gui_editor_bp.route('/api/layouts/load/<name>')
+        if metadata:
+            layout['metadata'] = metadata
+
+        path = os.path.join(LAYOUTS_DIR, f"{safe_name}.json")
+        os.makedirs(LAYOUTS_DIR, exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(layout, f)
+
+        # Clear existing previews for this layout to avoid mixing old and new images
+        preview_dir_path = os.path.join(LAYOUT_PREVIEWS_DIR, safe_name)
+        if os.path.exists(preview_dir_path):
+            shutil.rmtree(preview_dir_path)
+
+        # Save Preview Image (Thumbnail)
+        if preview_image:
+            if ',' in preview_image:
+                preview_image = preview_image.split(',')[1]
+            try:
+                os.makedirs(LAYOUT_PREVIEWS_DIR, exist_ok=True)
+                preview_path = os.path.join(LAYOUT_PREVIEWS_DIR, f"{safe_name}.jpg")
+                with open(preview_path, "wb") as f:
+                    f.write(base64.b64decode(preview_image))
+            except Exception as e:
+                print(f"Error saving layout preview: {e}")
+
+        # Save status.json for Android App Deep Link
+        bg_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'editor_backgrounds', safe_name)
+        if not os.path.exists(bg_dir):
+            os.makedirs(bg_dir)
+
+        status_data = {
+            "action_url": action_url,
+            "title": media_title,
+            "timestamp": int(time.time())
+        }
+        with open(os.path.join(bg_dir, 'status.json'), 'w', encoding='utf-8') as f:
+            json.dump(status_data, f)
+
+        return jsonify({"status": "success", "name": safe_name})
+    except Exception as e:
+        print(f"Error saving layout: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@gui_editor_bp.route('/api/layouts/load/<path:name>')
 def load_layout(name):
     safe_name = "".join(c for c in name if c.isalnum() or c in " ._-").strip()
     path = os.path.join(LAYOUTS_DIR, f"{safe_name}.json")
     if os.path.exists(path):
-        with open(path, 'r') as f:
+        with open(path, 'r', encoding='utf-8') as f:
             return jsonify(json.load(f))
     return jsonify({"status": "error", "message": "Layout not found"}), 404
 
-@gui_editor_bp.route('/api/layouts/preview/<name>')
+@gui_editor_bp.route('/api/layouts/preview/<path:name>')
 def get_layout_preview(name):
     safe_name = "".join(c for c in name if c.isalnum() or c in " ._-").strip()
     filename = f"{safe_name}.jpg"
-    return send_from_directory(LAYOUT_PREVIEWS_DIR, filename)
+    preview_path = os.path.join(LAYOUT_PREVIEWS_DIR, filename)
+    if os.path.exists(preview_path):
+        return send_from_directory(LAYOUT_PREVIEWS_DIR, filename)
+    # 1x1 transparent GIF — avoids noisy 404s for presets without thumbnails yet
+    pixel = base64.b64decode("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7")
+    return Response(pixel, mimetype="image/gif")
 
 @gui_editor_bp.route('/api/layouts/for-app')
 def list_layouts_for_app():
@@ -2403,11 +2428,16 @@ def get_current_background():
         
     return jsonify({"error": "Background not found"}), 404
 
-@gui_editor_bp.route('/api/layouts/delete/<name>', methods=['POST'])
+@gui_editor_bp.route('/api/layouts/delete/<path:name>', methods=['POST'])
 def delete_layout(name):
     safe_name = "".join(c for c in name if c.isalnum() or c in " ._-").strip()
     if not safe_name:
         return jsonify({"status": "error", "message": "Invalid name"}), 400
+    if safe_name in MANAGED_LAYOUT_NAMES:
+        return jsonify({
+            "status": "error",
+            "message": f'"{safe_name}" is a built-in layout and cannot be deleted. Save a copy under a new name instead.'
+        }), 400
 
     json_path = os.path.join(LAYOUTS_DIR, f"{safe_name}.json")
     preview_path = os.path.join(LAYOUT_PREVIEWS_DIR, f"{safe_name}.jpg")

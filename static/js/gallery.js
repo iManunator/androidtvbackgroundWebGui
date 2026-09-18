@@ -167,7 +167,9 @@ async function saveToGalleryInternal(layoutName, overwriteFilename = null, targe
     
     if (overlay) overlay.visible = wasVisible;
 
-    const json = canvas.toJSON(['dataTag', 'fullMediaText', 'selectable', 'evented', 'lockScalingY', 'splitByGrapheme', 'fixedHeight', 'editable', 'matchHeight', 'autoBackgroundColor', 'textureId', 'textureScale', 'textureRotation', 'textureOpacity']);
+    const json = (typeof safeCanvasToJSON === 'function')
+        ? safeCanvasToJSON(['dataTag', 'fullMediaText', 'selectable', 'evented', 'lockScalingY', 'splitByGrapheme', 'fixedHeight', 'editable', 'matchHeight', 'autoBackgroundColor', 'textureId', 'textureScale', 'textureRotation', 'textureOpacity'])
+        : canvas.toJSON(['dataTag', 'fullMediaText', 'selectable', 'evented', 'lockScalingY', 'splitByGrapheme', 'fixedHeight', 'editable', 'matchHeight', 'autoBackgroundColor', 'textureId', 'textureScale', 'textureRotation', 'textureOpacity']);
     
     const payload = { 
         image: dataURL, 
@@ -407,6 +409,8 @@ async function loadLayoutsList() {
     layouts.forEach(l => {
         const key = `LayoutPreview: ${l}`;
         let previews = '';
+        const safeLabel = String(l).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const nameEnc = encodeURIComponent(l);
         
         // Layout Thumbnail URL (with timestamp to force refresh)
         const thumbSrc = `/api/layouts/preview/${encodeURIComponent(l)}?t=${new Date().getTime()}`;
@@ -414,7 +418,7 @@ async function loadLayoutsList() {
         if (loadedGalleryData[key]) {
             loadedGalleryData[key].slice(0, 10).forEach((img, index) => {
                 const src = `/api/gallery/image/${encodeURIComponent(key)}/${encodeURIComponent(img)}?t=${galleryCacheBuster}`;
-                previews += `<img src="${src}" onclick="openLightbox('${key}', ${index})">`;
+                previews += `<img src="${src}" onclick="openLightbox(${JSON.stringify(key)}, ${index})">`;
             });
         } else { previews = '<span style="font-size:11px; color:#666;">No generated images yet.</span>'; }
 
@@ -422,11 +426,11 @@ async function loadLayoutsList() {
             <div class="layout-header">
                 <div style="display:flex; align-items:center; gap:10px;">
                     <img src="${thumbSrc}" style="height:40px; width:71px; object-fit:cover; border-radius:4px; border:1px solid #555;" onerror="this.style.display='none'">
-                    <h3 style="margin:0; color:#fff; font-size:16px;">${l}</h3>
+                    <h3 style="margin:0; color:#fff; font-size:16px;">${safeLabel}</h3>
                 </div>
                 <div>
-                    <button onclick="loadLayout('${l}')" style="width:auto; padding:5px 15px; font-size:12px;">📂 Load</button>
-                    <button onclick="deleteLayout('${l}')" style="width:auto; padding:5px 15px; font-size:12px; background-color: #c62828; margin-left: 5px;">🗑️ Delete</button>
+                    <button data-layout-enc="${nameEnc}" onclick="loadLayout(decodeURIComponent(this.dataset.layoutEnc))" style="width:auto; padding:5px 15px; font-size:12px;">📂 Load</button>
+                    <button data-layout-enc="${nameEnc}" onclick="deleteLayout(decodeURIComponent(this.dataset.layoutEnc))" style="width:auto; padding:5px 15px; font-size:12px; background-color: #c62828; margin-left: 5px;">🗑️ Delete</button>
                 </div>
             </div>
             <div class="layout-previews">${previews}</div>
@@ -439,12 +443,14 @@ async function deleteLayout(name) {
     if (!confirm(`Are you sure you want to delete the layout "${name}"? Generated images in the gallery will be kept.`)) {
         return;
     }
-    const resp = await fetch(`/api/layouts/delete/${name}`, { method: 'POST' });
+    const resp = await fetch(`/api/layouts/delete/${encodeURIComponent(name)}`, { method: 'POST' });
+    let result = {};
+    try { result = await resp.json(); } catch (e) {}
     if (resp.ok) {
         loadLayoutsList();
         loadGallery();
     } else {
-        alert("Error deleting layout.");
+        alert(result.message || "Error deleting layout.");
     }
 }
 

@@ -1662,7 +1662,7 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                         let wLabel = mediaData.watch_status || null;
                         if (!wLabel || !String(wLabel).trim()) {
                             wLabel = wState === 'watched' ? 'Watched'
-                                : (wState === 'partially_watched' ? 'In progress' : 'Unwatched');
+                                : (wState === 'partially_watched' ? 'Partly watched' : 'Unwatched');
                         }
                         let wIcon = '/static/provider_logos/watch_unwatched.svg';
                         if (wState === 'watched' || /^(watched)$/i.test(String(wLabel))) {
@@ -3779,7 +3779,9 @@ function jumpToHistory(index) {
 function saveHistory(force = false) {
     if (isUndoRedoProcessing || !canvas) return;
 
-    const json = canvas.toJSON(['dataTag', 'fullMediaText', 'selectable', 'evented', 'lockScalingY', 'splitByGrapheme', 'fixedHeight', 'editable', 'matchHeight', 'autoBackgroundColor', 'textureId', 'textureScale', 'textureRotation', 'textureOpacity', 'snapToObjects', 'logoAutoFix', 'maxItems', 'fullList', 'slotWidth', 'slotHeight', 'providerLogoFile']);
+    const json = (typeof safeCanvasToJSON === 'function')
+        ? safeCanvasToJSON()
+        : canvas.toJSON(['dataTag', 'fullMediaText', 'selectable', 'evented', 'lockScalingY', 'splitByGrapheme', 'fixedHeight', 'editable', 'matchHeight', 'autoBackgroundColor', 'textureId', 'textureScale', 'textureRotation', 'textureOpacity', 'snapToObjects', 'logoAutoFix', 'maxItems', 'fullList', 'slotWidth', 'slotHeight', 'providerLogoFile']);
 
     // Filter out fade effects and grid lines (same as saveToLocalStorage)
     json.objects = json.objects.filter(o => o.dataTag !== 'fade_effect' && o.dataTag !== 'grid_line' && o.dataTag !== 'guide_overlay' && o.dataTag !== 'guide' && o.dataTag !== 'ambilight_bg' && o.dataTag !== 'separator' && o.dataTag !== 'row_separator');
@@ -5276,6 +5278,66 @@ function setUIInteraction(enabled) {
     if (enabled) updateSelectionUI();
 }
 
+/** Fabric crashes in stylesToArray when text.styles has holes / bad line maps (common after Groups). */
+function sanitizeFabricTextStyles(root) {
+    const visit = (obj) => {
+        if (!obj) return;
+        if (obj.type === 'group') {
+            const kids = (typeof obj.getObjects === 'function') ? obj.getObjects() : (obj._objects || []);
+            kids.forEach(visit);
+        }
+        if (!('styles' in obj) && obj.styles === undefined) return;
+        const styles = obj.styles;
+        if (!styles || typeof styles !== 'object' || Array.isArray(styles)) {
+            obj.styles = {};
+            return;
+        }
+        const cleaned = {};
+        Object.keys(styles).forEach((lineKey) => {
+            const line = styles[lineKey];
+            if (!line || typeof line !== 'object' || Array.isArray(line)) return;
+            const lineOut = {};
+            Object.keys(line).forEach((charKey) => {
+                const st = line[charKey];
+                if (st && typeof st === 'object' && !Array.isArray(st)) lineOut[charKey] = st;
+            });
+            cleaned[lineKey] = lineOut;
+        });
+        obj.styles = cleaned;
+    };
+    if (root) visit(root);
+    else if (canvas) canvas.getObjects().forEach(visit);
+}
+
+const LAYOUT_TOJSON_PROPS = [
+    'dataTag', 'fullMediaText', 'selectable', 'evented', 'lockScalingY', 'splitByGrapheme',
+    'fixedHeight', 'editable', 'matchHeight', 'autoBackgroundColor', 'textureId', 'textureScale',
+    'textureRotation', 'textureOpacity', 'snapToObjects', 'logoAutoFix', 'maxItems', 'fullList',
+    'slotWidth', 'slotHeight', 'providerLogoFile'
+];
+
+function safeCanvasToJSON(extraProps) {
+    const props = extraProps || LAYOUT_TOJSON_PROPS;
+    sanitizeFabricTextStyles();
+    try {
+        return canvas.toJSON(props);
+    } catch (e) {
+        console.warn('canvas.toJSON failed; clearing text styles and retrying', e);
+        sanitizeFabricTextStyles();
+        canvas.getObjects().forEach((obj) => {
+            const clear = (o) => {
+                if (!o) return;
+                if (o.type === 'group') {
+                    const kids = (typeof o.getObjects === 'function') ? o.getObjects() : (o._objects || []);
+                    kids.forEach(clear);
+                }
+                if ('styles' in o || o.styles !== undefined) o.styles = {};
+            };
+            clear(obj);
+        });
+        return canvas.toJSON(props);
+    }
+}
 
 function changeResolution() {
     if (gridEnabled) removeGrid();
@@ -5291,150 +5353,163 @@ function changeResolution() {
 }
 
 async function saveLayout() {
-    const name = document.getElementById('layoutName').value;
-    if (!name) return alert("Please enter a layout name");
+    const rawName = (document.getElementById('layoutName').value || '').trim();
+    if (!rawName) return alert("Please enter a layout name");
 
-    const btn = document.querySelector('button[onclick="saveLayout()"]');
-    const originalText = btn.innerText;
-    btn.disabled = true;
-    btn.innerText = "Saving Layout...";
+    const btn = document.getElementById('btn-save-layout') || document.querySelector('button[onclick="saveLayout()"]');
+    const originalText = btn ? btn.innerText : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = "Saving Layout...";
+    }
     setUIInteraction(false);
 
-    const layout = canvas.toJSON(['dataTag', 'fullMediaText', 'selectable', 'evented', 'lockScalingY', 'splitByGrapheme', 'fixedHeight', 'editable', 'matchHeight', 'autoBackgroundColor', 'textureId', 'textureScale', 'textureRotation', 'textureOpacity', 'snapToObjects', 'logoAutoFix', 'maxItems', 'fullList', 'slotWidth', 'slotHeight', 'providerLogoFile']);
-
-    // Filter out fade effects and grid lines BEFORE saving
-    layout.objects = layout.objects.filter(o => o.dataTag !== 'fade_effect' && o.dataTag !== 'grid_line' && o.dataTag !== 'guide_overlay' && o.dataTag !== 'ambilight_bg' && o.dataTag !== 'separator' && o.dataTag !== 'row_separator');
-
-    // Normalize to 1080p base resolution
-    const currentScale = canvas.width / BASE_WIDTH;
-    if (currentScale !== 1) {
-        layout.objects.forEach(obj => {
-            obj.left /= currentScale;
-            obj.top /= currentScale;
-            obj.scaleX /= currentScale;
-            obj.scaleY /= currentScale;
-        });
-    }
-
-    // Convert absolute URLs to relative
-    layout.objects.forEach(obj => {
-        if (obj.type === 'image' && obj.src && obj.src.startsWith(window.location.origin)) {
-            obj.src = obj.src.replace(window.location.origin, '');
-        }
-    });
-
-    layout.custom_effects = {
-        bgColor: document.getElementById('bgColor').value,
-        bgBrightness: document.getElementById('bgBrightness').value,
-        fadeEffect: document.getElementById('fadeEffect').value,
-        fadeRadius: document.getElementById('fadeRadius').value,
-        fadeSoftness: document.getElementById('fadeSoftness') ? document.getElementById('fadeSoftness').value : 40,
-        fadeLeft: document.getElementById('fadeLeft').value,
-        fadeRight: document.getElementById('fadeRight').value,
-        fadeTop: document.getElementById('fadeTop').value,
-        fadeBottom: document.getElementById('fadeBottom').value,
-        tagAlignment: document.getElementById('tagAlignSelect').value,
-        tagPadding: document.getElementById('tagPaddingInput') ? document.getElementById('tagPaddingInput').value : 20,
-        lineSpacing: document.getElementById('lineSpacingInput') ? document.getElementById('lineSpacingInput').value : 20,
-        tagSeparator: document.getElementById('tagSeparatorInput') ? document.getElementById('tagSeparatorInput').value : '',
-        tagSeparatorSize: document.getElementById('tagSeparatorSizeInput') ? document.getElementById('tagSeparatorSizeInput').value : 30,
-        tagSeparatorColor: document.getElementById('tagSeparatorColorInput') ? document.getElementById('tagSeparatorColorInput').value : '#ffffff',
-        tagSeparatorTexture: document.getElementById('tagSeparatorTextureSelect') ? document.getElementById('tagSeparatorTextureSelect').value : '',
-        tagSeparatorOpacity: document.getElementById('tagSeparatorOpacityInput') ? document.getElementById('tagSeparatorOpacityInput').value : 100,
-        rowSeparatorStyle: document.getElementById('rowSeparatorStyle') ? document.getElementById('rowSeparatorStyle').value : '',
-        rowSeparatorThickness: document.getElementById('rowSeparatorThickness') ? document.getElementById('rowSeparatorThickness').value : 2,
-        rowSeparatorColor: document.getElementById('rowSeparatorColor') ? document.getElementById('rowSeparatorColor').value : '#ffffff',
-        rowSeparatorTexture: document.getElementById('rowSeparatorTextureSelect') ? document.getElementById('rowSeparatorTextureSelect').value : '',
-        rowSeparatorOpacity: document.getElementById('rowSeparatorOpacityInput') ? document.getElementById('rowSeparatorOpacityInput').value : 100,
-        rowSeparatorAlign: document.getElementById('rowSeparatorAlign') ? document.getElementById('rowSeparatorAlign').value : 'center',
-        rowSeparatorAutoWidth: document.getElementById('rowSeparatorAutoWidth') ? document.getElementById('rowSeparatorAutoWidth').checked : true,
-        rowSeparatorWidth: document.getElementById('rowSeparatorWidth') ? document.getElementById('rowSeparatorWidth').value : 500,
-        textContentAlignment: document.getElementById('textContentAlignSelect').value,
-        genreLimit: document.getElementById('genreLimitSlider').value,
-        overlayId: document.getElementById('overlaySelect').value,
-        margins: {
-            top: document.getElementById('marginTopInput').value,
-            bottom: document.getElementById('marginBottomInput').value,
-            left: document.getElementById('marginLeftInput').value,
-            right: document.getElementById('marginRightInput').value
-        },
-        logoAutoFix: document.getElementById('batchLogoAutoFix') ? document.getElementById('batchLogoAutoFix').checked : true,
-        backgroundMode: backgroundMode
-    };
-
-    // Save blocked areas to JSON so render_task.js can use them
-    const overlayId = document.getElementById('overlaySelect').value;
-    if (overlayId) {
-        const profile = overlayProfiles.find(p => p.id === overlayId);
-        if (profile && profile.blocked_areas) {
-            layout.custom_effects.blocked_areas = profile.blocked_areas;
-        }
-    }
-
-    // Generate Preview Thumbnail (smaller size)
-    const previewData = canvas.toDataURL({ format: 'jpeg', quality: 0.8, multiplier: 0.5 });
-
-    // Use shared metadata builder
-    const fullMetadata = extractMetadata(lastFetchedData);
-    const actionUrl = fullMetadata.action_url;
-    const mediaTitle = fullMetadata.title;
-
-    const resp = await fetch('/api/layouts/save', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
-            name,
-            layout,
-            preview_image: previewData,
-            action_url: actionUrl,
-            media_title: mediaTitle,
-            metadata: fullMetadata
-        })
-    });
-    if (!resp.ok) {
-        alert("Error saving layout");
-        btn.innerText = originalText;
-        btn.disabled = false;
-        setUIInteraction(true);
-        return;
-    }
-
-    // Generate 10 Previews
-    const generatedImages = [];
-    isBatchRunning = true; // Suppress UI updates in fetchRandomPreview
     try {
-        for (let i = 0; i < 10; i++) {
-            btn.innerText = `Generating ${i + 1}/10...`;
-            await fetchRandomPreview();
-            const res = await saveToGalleryInternal(name, null, 'layout_preview');
-            if (res && res.status === 'success') generatedImages.push(res.filename);
+        const layout = safeCanvasToJSON();
+
+        // Filter out fade effects and grid lines BEFORE saving
+        layout.objects = (layout.objects || []).filter(o => o.dataTag !== 'fade_effect' && o.dataTag !== 'grid_line' && o.dataTag !== 'guide_overlay' && o.dataTag !== 'ambilight_bg' && o.dataTag !== 'separator' && o.dataTag !== 'row_separator');
+
+        // Normalize to 1080p base resolution
+        const currentScale = canvas.width / BASE_WIDTH;
+        if (currentScale !== 1) {
+            layout.objects.forEach(obj => {
+                obj.left /= currentScale;
+                obj.top /= currentScale;
+                obj.scaleX /= currentScale;
+                obj.scaleY /= currentScale;
+            });
         }
-    } catch (e) { console.error(e); }
-    finally {
-        isBatchRunning = false;
-        btn.innerText = originalText;
-        btn.disabled = false;
+
+        // Convert absolute URLs to relative; drop huge data/blob payloads so Save As stays lightweight
+        layout.objects.forEach(obj => {
+            if (obj.type !== 'image' || !obj.src) return;
+            if (typeof obj.src === 'string' && obj.src.startsWith(window.location.origin)) {
+                obj.src = obj.src.replace(window.location.origin, '');
+            }
+            if (typeof obj.src === 'string' && (obj.src.startsWith('data:') || obj.src.startsWith('blob:'))) {
+                delete obj.src;
+            }
+        });
+
+        // Saving under a new name = user copy, not a managed preset
+        const managedNames = ['Default', 'Netflix Hero', 'Prime Cinematic', 'Google TV Clean', 'Status Focus', 'Jellyfin Dense'];
+        if (!managedNames.includes(rawName)) {
+            delete layout.managed_preset;
+            delete layout.layout_preset_version;
+            layout.preset_name = rawName;
+        }
+
+        layout.custom_effects = {
+            bgColor: document.getElementById('bgColor').value,
+            bgBrightness: document.getElementById('bgBrightness').value,
+            fadeEffect: document.getElementById('fadeEffect').value,
+            fadeRadius: document.getElementById('fadeRadius').value,
+            fadeSoftness: document.getElementById('fadeSoftness') ? document.getElementById('fadeSoftness').value : 40,
+            fadeLeft: document.getElementById('fadeLeft').value,
+            fadeRight: document.getElementById('fadeRight').value,
+            fadeTop: document.getElementById('fadeTop').value,
+            fadeBottom: document.getElementById('fadeBottom').value,
+            tagAlignment: document.getElementById('tagAlignSelect').value,
+            tagPadding: document.getElementById('tagPaddingInput') ? document.getElementById('tagPaddingInput').value : 20,
+            lineSpacing: document.getElementById('lineSpacingInput') ? document.getElementById('lineSpacingInput').value : 20,
+            tagSeparator: document.getElementById('tagSeparatorInput') ? document.getElementById('tagSeparatorInput').value : '',
+            tagSeparatorSize: document.getElementById('tagSeparatorSizeInput') ? document.getElementById('tagSeparatorSizeInput').value : 30,
+            tagSeparatorColor: document.getElementById('tagSeparatorColorInput') ? document.getElementById('tagSeparatorColorInput').value : '#ffffff',
+            tagSeparatorTexture: document.getElementById('tagSeparatorTextureSelect') ? document.getElementById('tagSeparatorTextureSelect').value : '',
+            tagSeparatorOpacity: document.getElementById('tagSeparatorOpacityInput') ? document.getElementById('tagSeparatorOpacityInput').value : 100,
+            rowSeparatorStyle: document.getElementById('rowSeparatorStyle') ? document.getElementById('rowSeparatorStyle').value : '',
+            rowSeparatorThickness: document.getElementById('rowSeparatorThickness') ? document.getElementById('rowSeparatorThickness').value : 2,
+            rowSeparatorColor: document.getElementById('rowSeparatorColor') ? document.getElementById('rowSeparatorColor').value : '#ffffff',
+            rowSeparatorTexture: document.getElementById('rowSeparatorTextureSelect') ? document.getElementById('rowSeparatorTextureSelect').value : '',
+            rowSeparatorOpacity: document.getElementById('rowSeparatorOpacityInput') ? document.getElementById('rowSeparatorOpacityInput').value : 100,
+            rowSeparatorAlign: document.getElementById('rowSeparatorAlign') ? document.getElementById('rowSeparatorAlign').value : 'center',
+            rowSeparatorAutoWidth: document.getElementById('rowSeparatorAutoWidth') ? document.getElementById('rowSeparatorAutoWidth').checked : true,
+            rowSeparatorWidth: document.getElementById('rowSeparatorWidth') ? document.getElementById('rowSeparatorWidth').value : 500,
+            textContentAlignment: document.getElementById('textContentAlignSelect').value,
+            genreLimit: document.getElementById('genreLimitSlider').value,
+            overlayId: document.getElementById('overlaySelect').value,
+            margins: {
+                top: document.getElementById('marginTopInput').value,
+                bottom: document.getElementById('marginBottomInput').value,
+                left: document.getElementById('marginLeftInput').value,
+                right: document.getElementById('marginRightInput').value
+            },
+            logoAutoFix: document.getElementById('batchLogoAutoFix') ? document.getElementById('batchLogoAutoFix').checked : true,
+            backgroundMode: backgroundMode
+        };
+
+        const overlayId = document.getElementById('overlaySelect').value;
+        if (overlayId) {
+            const profile = overlayProfiles.find(p => p.id === overlayId);
+            if (profile && profile.blocked_areas) {
+                layout.custom_effects.blocked_areas = profile.blocked_areas;
+            }
+        }
+
+        // Lightweight thumbnail only — do NOT shuffle 10 previews (that was hanging the UI)
+        let previewData = null;
+        try {
+            previewData = canvas.toDataURL({ format: 'jpeg', quality: 0.7, multiplier: 0.35 });
+        } catch (thumbErr) {
+            console.warn('Layout thumbnail skipped', thumbErr);
+        }
+
+        const fullMetadata = extractMetadata(lastFetchedData);
+
+        const resp = await fetch('/api/layouts/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: rawName,
+                layout,
+                preview_image: previewData,
+                action_url: fullMetadata.action_url,
+                media_title: fullMetadata.title,
+                metadata: fullMetadata
+            })
+        });
+        let result = {};
+        try { result = await resp.json(); } catch (e) { result = {}; }
+        if (!resp.ok) {
+            alert(result.message || "Error saving layout");
+            return;
+        }
+        const savedName = result.name || rawName;
+        document.getElementById('layoutName').value = savedName;
+        if (typeof loadLayoutsList === 'function') loadLayoutsList();
+        alert(`Layout "${savedName}" saved.`);
+    } catch (e) {
+        console.error(e);
+        alert("Error saving layout: " + (e && e.message ? e.message : e));
+    } finally {
+        if (btn) {
+            btn.innerText = originalText;
+            btn.disabled = false;
+        }
         setUIInteraction(true);
     }
-
-    loadLayoutsList();
-    await loadGallery(); // Refresh gallery data so lightbox works
-    showPreviewPopup(name, generatedImages);
 }
 
 function showPreviewPopup(layoutName, images) {
     const grid = document.getElementById('preview-grid');
+    if (!grid) return;
     grid.innerHTML = '';
     const layoutKey = `LayoutPreview: ${layoutName}`;
 
-    images.forEach(img => {
+    (images || []).forEach(img => {
         const src = `/api/gallery/image/${encodeURIComponent(layoutKey)}/${encodeURIComponent(img)}`;
+        const list = (loadedGalleryData && loadedGalleryData[layoutKey]) ? loadedGalleryData[layoutKey] : images;
+        const idx = list.indexOf(img);
         grid.innerHTML += `
             <div class="gallery-item">
-                <img src="${src}" onclick="closePreviewPopup(); openLightbox('${layoutKey}', ${loadedGalleryData[layoutKey].indexOf(img)})">
+                <img src="${src}" onclick="closePreviewPopup(); openLightbox(${JSON.stringify(layoutKey)}, ${idx >= 0 ? idx : 0})">
                 <div class="caption">${img}</div>
-                <button onclick="closePreviewPopup(); editGalleryImage('${layoutKey}', '${img}')" style="position:absolute; top:5px; right:5px; width:auto; padding:4px 8px; font-size:12px; background:rgba(0,0,0,0.7); border:1px solid #fff; cursor:pointer; color:white;">✏️</button>
+                <button onclick="closePreviewPopup(); editGalleryImage(${JSON.stringify(layoutKey)}, ${JSON.stringify(img)})" style="position:absolute; top:5px; right:5px; width:auto; padding:4px 8px; font-size:12px; background:rgba(0,0,0,0.7); border:1px solid #fff; cursor:pointer; color:white;">✏️</button>
             </div>`;
     });
-    document.getElementById('preview-popup').style.display = 'flex';
+    const popup = document.getElementById('preview-popup');
+    if (popup) popup.style.display = 'flex';
 }
 
 function closePreviewPopup() {
@@ -5443,7 +5518,7 @@ function closePreviewPopup() {
 
 async function loadLayout(name, silent = false) {
     if (!silent) console.log(`Loading layout: ${name}`);
-    const resp = await fetch(`/api/layouts/load/${name}`);
+    const resp = await fetch(`/api/layouts/load/${encodeURIComponent(name)}`);
     if (!resp.ok) {
         console.error(`Failed to fetch layout: ${name}`);
 
@@ -5647,7 +5722,13 @@ function saveToLocalStorage() {
 
 function performSaveToLocalStorage() {
     if (!canvas) return;
-    const json = canvas.toJSON(['dataTag', 'fullMediaText', 'selectable', 'evented', 'lockScalingY', 'splitByGrapheme', 'fixedHeight', 'editable', 'matchHeight', 'autoBackgroundColor', 'textureId', 'textureScale', 'textureRotation', 'textureOpacity', 'snapToObjects', 'logoAutoFix', 'maxItems', 'fullList', 'slotWidth', 'slotHeight', 'providerLogoFile']);
+    let json;
+    try {
+        json = safeCanvasToJSON();
+    } catch (e) {
+        console.warn('autosave skipped (serialize failed)', e);
+        return;
+    }
     // Filter out fade effects so they aren't saved as static objects
     json.objects = json.objects.filter(o => o.dataTag !== 'fade_effect' && o.dataTag !== 'grid_line' && o.dataTag !== 'guide_overlay' && o.dataTag !== 'separator' && o.dataTag !== 'row_separator');
     // Filter out ambilight background (it is auto-generated)
@@ -6475,13 +6556,19 @@ function updateCronFrequencyOptions() {
 }
 
 function toggleCronInputs() {
-    const mode = document.getElementById('cronSourceMode').value;
-    const filter = document.getElementById('cronFilterMode').value;
+    const modeEl = document.getElementById('cronSourceMode');
+    const filterEl = document.getElementById('cronFilterMode');
+    if (!modeEl || !filterEl) return;
+    const mode = modeEl.value;
+    const filter = filterEl.value;
 
-    document.getElementById('cronFilterSettings').style.display = (mode === 'library') ? 'block' : 'none';
-    document.getElementById('cronRandomSettings').style.display = (mode === 'random') ? 'block' : 'none';
+    const filterSettings = document.getElementById('cronFilterSettings');
+    const randomSettings = document.getElementById('cronRandomSettings');
+    if (filterSettings) filterSettings.style.display = (mode === 'library') ? 'block' : 'none';
+    if (randomSettings) randomSettings.style.display = (mode === 'random') ? 'block' : 'none';
 
     const valInput = document.getElementById('cronFilterValue');
+    if (!valInput) return;
     if (mode === 'library' && ['year', 'genre', 'rating'].includes(filter)) {
         valInput.style.display = 'block';
         if (filter === 'year') valInput.placeholder = "Year (e.g. 2023)";

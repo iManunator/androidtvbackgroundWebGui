@@ -231,7 +231,7 @@ def fetch_jellyfin_cron(config, job):
     params = [
         f"IncludeItemTypes={job.get('item_types', 'Movie,Series')}",
         "Recursive=true", "ExcludeItemTypes=BoxSet",
-        "Fields=Overview,Genres,OfficialRating,CommunityRating,ProviderIds,ProductionYear,RunTimeTicks,OriginalTitle,Tags,Studios,InheritedParentalRatingValue,ImageTags,ParentId,People,UserData,Type"
+        "Fields=Overview,Genres,OfficialRating,CommunityRating,ProviderIds,ProductionYear,RunTimeTicks,OriginalTitle,Tags,Studios,InheritedParentalRatingValue,ImageTags,ParentId,People,UserData,Type,RecursiveItemCount"
     ]
 
     jf_watch_filter = media_status.jellyfin_filter_param(fmode)

@@ -2321,10 +2321,10 @@
     <script>
         window.initialBackdropUrl = "{{ data.backdrop_url }}";
     </script>
-    <script src="{{ url_for('static', filename='js/gallery.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/batch.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/editor.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/translations.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/gallery.js') }}?v={{ data.version }}"></script>
+    <script src="{{ url_for('static', filename='js/batch.js') }}?v={{ data.version }}"></script>
+    <script src="{{ url_for('static', filename='js/editor.js') }}?v={{ data.version }}"></script>
+    <script src="{{ url_for('static', filename='js/translations.js') }}?v={{ data.version }}"></script>
     <script>
         function testJellyfinConnection() {
             const url = document.getElementById('set-jf-url').value;
