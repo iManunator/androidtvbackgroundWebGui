@@ -1850,32 +1850,35 @@ function getCertificationFilename(rating) {
 
                     // Seerr-only / upcoming → Seerr logo only (never Jellyfin)
                     if (seerrItem && libState !== 'in_library' && !data.jellyfin_id) {
-                        providerText = "";
                         providerLogo = "seerrlogo.png";
                     } else if (libState === 'seerr_only' || libState === 'upcoming') {
-                        providerText = "";
                         providerLogo = "seerrlogo.png";
                     } else if (libState === 'in_library' || data.jellyfin_id || source === 'Jellyfin') {
-                        providerText = "";
                         providerLogo = "jellyfinlogo.png";
                     } else if (seerrItem || String(source).startsWith('Seerr')) {
-                        providerText = "";
                         providerLogo = "seerrlogo.png";
                     } else if (source === 'TMDB') {
-                        providerText = "";
                         providerLogo = "tmdblogo.png";
                     } else if (source === 'Trakt') {
-                        providerText = "";
                         providerLogo = "traktlogo.png";
                     } else if (source === 'Plex') {
-                        providerText = "";
                         providerLogo = "plexlogo.png";
                     } else if (['Sonarr', 'Radarr', 'Jellyseerr'].includes(source) || (source && source.includes('Missing'))) {
-                        providerText = "";
                         providerLogo = "jellyfinlogo.png";
                     } else {
-                        providerText = "";
                         providerLogo = seerrItem ? "seerrlogo.png" : "jellyfinlogo.png";
+                    }
+
+                    // Caption beside Seerr logo for requestable / upcoming titles
+                    providerText = "";
+                    if (providerLogo === "seerrlogo.png") {
+                        if (libState === 'upcoming') providerText = "Coming soon on Seerr";
+                        else if (data.can_request || libState === 'seerr_only' || data.availability === 'not_available' ||
+                            String(source).includes('Requestable')) {
+                            providerText = "Request on Seerr";
+                        } else if (!(libState === 'in_library' || data.jellyfin_id)) {
+                            providerText = "On Seerr";
+                        }
                     }
 
                     if (providerLogo) {
@@ -1934,35 +1937,34 @@ function getCertificationFilename(rating) {
                                             return;
                                         }
 
-                                        const textObj = new fabric.IText(providerText, {
-                                            fontFamily: currentFont,
-                                            fontSize: currentSize,
-                                            fill: currentFill,
+                                        const textObj = new fabric.IText('—  ' + providerText, {
+                                            fontFamily: 'Georgia',
+                                            fontSize: Math.max(22, Math.round((currentSize || 28) * 0.95)),
+                                            fontStyle: 'italic',
+                                            fill: currentFill || '#f5f5f5',
+                                            shadow: '2px 2px 8px rgba(0,0,0,0.75)',
                                             originY: 'center',
                                             originX: 'left',
                                             left: 0,
-                                            top: 0
+                                            top: 0,
+                                            editable: false
                                         });
 
-                                        // Scale Logo to match Text Height + 20%
-                                        // We use the calculated height of the text object
-                                        const targetH = textObj.height * textObj.scaleY;
-                                        img.scaleToHeight(targetH * 1.2);
-                                        img.set({ originY: 'center', originX: 'left', left: textObj.getScaledWidth() + 15, top: 0 });
+                                        const targetH = obj.slotHeight || (currentSize * 1.25) || (textObj.getScaledHeight() * 1.15);
+                                        img.scaleToHeight(targetH);
+                                        img.set({ originY: 'center', originX: 'left', left: 0, top: 0 });
+                                        textObj.set({ left: img.getScaledWidth() + 14, top: img.getScaledHeight() / 2 });
 
-                                        // Group
-                                        const group = new fabric.Group([textObj, img], {
+                                        // Group: logo left, caption right
+                                        const group = new fabric.Group([img, textObj], {
                                             left: obj.left,
                                             top: obj.top,
-                                            originX: obj.originX,
-                                            originY: obj.originY,
+                                            originX: 'left',
+                                            originY: 'top',
                                             dataTag: 'provider_source',
-                                            fontFamily: obj.fontFamily || 'Roboto', // Persist font in output
-                                            scaleX: obj.scaleX,
-                                            scaleY: obj.scaleY,
-                                            angle: obj.angle,
-                                            opacity: obj.opacity,
-                                            selectable: false // Render task objects usually static
+                                            providerLogoFile: providerLogo,
+                                            slotHeight: targetH,
+                                            selectable: false
                                         });
 
                                         canvas.remove(obj);

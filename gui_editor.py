@@ -1,5 +1,4 @@
-CURRENT_VERSION = "1.5.1"
-import os
+CURRENT_VERSION = "1.5.2"import os
 import sys
 import json
 import random
@@ -201,7 +200,7 @@ KNOWN_DIRS = [
 LAYOUTS_DIR = 'layouts'
 LAYOUT_BUNDLED_DIR = os.path.join(LAYOUTS_DIR, 'bundled')
 LAYOUT_PREVIEWS_DIR = os.path.join(LAYOUTS_DIR, 'previews')
-LAYOUT_PRESET_VERSION = 1
+LAYOUT_PRESET_VERSION = 2
 MANAGED_LAYOUT_NAMES = {
     "Default",
     "Netflix Hero",

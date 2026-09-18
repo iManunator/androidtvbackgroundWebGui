@@ -1196,6 +1196,18 @@ function resolveProviderLogoFile(mediaData) {
     return seerrItem ? 'seerrlogo.png' : 'jellyfinlogo.png';
 }
 
+function resolveProviderCaption(mediaData, pLogo) {
+    if (pLogo !== 'seerrlogo.png' || !mediaData) return '';
+    const lib = mediaData.library_state || '';
+    if (lib === 'in_library' || mediaData.jellyfin_id) return '';
+    if (lib === 'upcoming') return 'Coming soon on Seerr';
+    if (mediaData.can_request || lib === 'seerr_only' || mediaData.availability === 'not_available' ||
+        String(mediaData.source || '').includes('Requestable')) {
+        return 'Request on Seerr';
+    }
+    return 'On Seerr';
+}
+
 function placeProviderLogoPlaceholder() {
     const is4K = document.getElementById('resSelect') && document.getElementById('resSelect').value === '2160';
     const fontSize = is4K ? 48 : 32;
@@ -1743,8 +1755,8 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                         break;
                     case 'provider_source':
                         const srcVal = (mediaData.source || "Jellyfin");
-                        let pText = "";
                         let pLogo = resolveProviderLogoFile(mediaData);
+                        let pText = resolveProviderCaption(mediaData, pLogo);
 
                         if (pLogo) {
                             const p = new Promise(resolve => {
@@ -1752,17 +1764,17 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                                 fabric.Image.fromURL(logoUrl, function (img, isError) {
                                     if (isError || !img) {
                                         // Fallback to text only
-                                        obj.set({ text: pText + srcVal, visible: true });
+                                        obj.set({ text: (pText || srcVal), visible: true });
                                         resolve();
                                         return;
                                     }
 
                                     // Robust property preservation
                                     let currentProps = {
-                                        fontFamily: obj.fontFamily || 'Roboto',
-                                        fontSize: obj.fontSize || 40,
+                                        fontFamily: obj.fontFamily || 'Georgia',
+                                        fontSize: obj.fontSize || 28,
                                         fill: obj.fill || 'white',
-                                        shadow: obj.shadow || null,
+                                        shadow: obj.shadow || '2px 2px 8px rgba(0,0,0,0.75)',
                                         stroke: obj.stroke || null,
                                         strokeWidth: obj.strokeWidth || 0,
                                         textAlign: obj.textAlign || 'left'
@@ -1781,7 +1793,7 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                                         }
                                     }
 
-                                    // Logo-only badge (Seerr / Jellyfin) — keep user size across shuffles/saves
+                                    // Logo-only badge (Jellyfin / etc.)
                                     if (!pText) {
                                         if (obj.type === 'image' && obj.dataTag === 'provider_source' && obj.providerLogoFile === pLogo) {
                                             if (!obj.slotHeight) obj.slotHeight = obj.getScaledHeight();
@@ -1790,7 +1802,7 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                                             resolve();
                                             return;
                                         }
-                                        const targetH = obj.slotHeight || (obj.type === 'image' ? obj.getScaledHeight() : null) || ((currentProps.fontSize || 40) * 1.35);
+                                        const targetH = obj.slotHeight || (obj.type === 'image' ? obj.getScaledHeight() : null) || ((currentProps.fontSize || 28) * 1.35);
                                         img.scaleToHeight(targetH);
                                         img.set({
                                             left: obj.left,
@@ -1811,47 +1823,43 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                                         return;
                                     }
 
-                                    // Create Text Component
-                                    const textObj = new fabric.IText(pText, {
-                                        fontFamily: currentProps.fontFamily,
-                                        fontSize: currentProps.fontSize,
-                                        fill: currentProps.fill,
-                                        shadow: currentProps.shadow,
+                                    // Seerr: logo + "Request on Seerr" in elegant font
+                                    const captionFont = 'Georgia';
+                                    const captionSize = Math.max(22, Math.round((currentProps.fontSize || 28) * 0.95));
+                                    const textObj = new fabric.IText('—  ' + pText, {
+                                        fontFamily: captionFont,
+                                        fontSize: captionSize,
+                                        fontStyle: 'italic',
+                                        fill: currentProps.fill || '#f5f5f5',
+                                        shadow: currentProps.shadow || '2px 2px 8px rgba(0,0,0,0.75)',
                                         stroke: currentProps.stroke,
                                         strokeWidth: currentProps.strokeWidth,
-                                        textAlign: currentProps.textAlign,
+                                        textAlign: 'left',
                                         originY: 'center',
-                                        originX: 'left',
-                                        left: 0, top: 0,
                                         editable: false
                                     });
-
-
-                                    // Scale Logo
-                                    const targetH = textObj.height * textObj.scaleY;
-                                    img.scaleToHeight(targetH * 1.2);
-                                    img.set({ originY: 'center', originX: 'left', left: textObj.getScaledWidth() + 15, top: 0 });
-
-                                    // Create Group
-                                    const group = new fabric.Group([textObj, img], {
-                                        left: obj.left, top: obj.top,
-                                        originX: obj.originX, originY: obj.originY,
-                                        scaleX: obj.scaleX, scaleY: obj.scaleY,
-                                        angle: obj.angle, opacity: obj.opacity,
-                                        fontFamily: currentProps.fontFamily, // Store font for next reload
+                                    const targetH = obj.slotHeight || (obj.type === 'image' ? obj.getScaledHeight() : null) || (captionSize * 1.25);
+                                    img.scaleToHeight(targetH);
+                                    img.set({ left: 0, top: 0, originY: 'center' });
+                                    textObj.set({ left: img.getScaledWidth() + 14, top: img.getScaledHeight() / 2 });
+                                    const group = new fabric.Group([img, textObj], {
+                                        left: obj.left,
+                                        top: obj.top,
+                                        originX: 'left',
+                                        originY: 'top',
                                         dataTag: 'provider_source',
-                                        selectable: true // Editor allows selection
+                                        providerLogoFile: pLogo,
+                                        slotHeight: targetH
                                     });
-
                                     canvas.remove(obj);
                                     canvas.add(group);
                                     resolve();
-                                });
+                                }, { crossOrigin: 'anonymous' });
                             });
                             promises.push(p);
-                            val = undefined; // Signal that we handled it manually
+                            val = undefined;
                         } else {
-                            val = pText + srcVal;
+                            val = pText || srcVal;
                         }
                         break;
                     case 'certification':

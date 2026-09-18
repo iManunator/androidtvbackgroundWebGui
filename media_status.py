@@ -175,7 +175,11 @@ def apply_seerr_status(payload: dict, norm: Optional[dict] = None) -> dict:
 
 
 def attach_primary_score(payload: dict) -> dict:
-    """Pick a single display score: IMDb → RT critics → TMDb → community rating."""
+    """Pick a single display score.
+
+    Jellyfin library items prefer the Jellyfin community rating (logo + number).
+    Seerr / other sources: IMDb → RT critics → TMDb → community.
+    """
     if not isinstance(payload, dict):
         return payload
 
@@ -184,6 +188,35 @@ def attach_primary_score(payload: dict) -> dict:
             return None
         s = str(val).strip()
         return s or None
+
+    def _community() -> bool:
+        rating = payload.get("rating")
+        if rating in (None, "", "N/A"):
+            return False
+        try:
+            label = f"{float(rating):.1f}"
+        except (TypeError, ValueError):
+            label = str(rating)
+        payload["primary_score"] = label
+        payload["primary_score_source"] = "community"
+        payload["primary_score_label"] = label
+        return True
+
+    # Native Jellyfin items: always show Jellyfin community rating with Jellyfin logo
+    if payload.get("source") == "Jellyfin" and _community():
+        return payload
+
+    # Seerr title that resolved to a Jellyfin library item: prefer real JF rating if present
+    jf_rating = payload.get("jellyfin_rating")
+    if jf_rating not in (None, "", "N/A"):
+        try:
+            label = f"{float(jf_rating):.1f}"
+        except (TypeError, ValueError):
+            label = str(jf_rating)
+        payload["primary_score"] = label
+        payload["primary_score_source"] = "community"
+        payload["primary_score_label"] = label
+        return payload
 
     imdb = _clean(payload.get("seerr_imdb"))
     if imdb:
@@ -208,15 +241,7 @@ def attach_primary_score(payload: dict) -> dict:
         payload["primary_score_label"] = label
         return payload
 
-    rating = payload.get("rating")
-    if rating not in (None, "", "N/A"):
-        try:
-            label = f"{float(rating):.1f}"
-        except (TypeError, ValueError):
-            label = str(rating)
-        payload["primary_score"] = label
-        payload["primary_score_source"] = "community"
-        payload["primary_score_label"] = label
+    if _community():
         return payload
 
     payload.setdefault("primary_score", "")
@@ -311,4 +336,6 @@ def enrich_with_jellyfin_watch(payload: dict, config: dict) -> dict:
     watch = jellyfin_status_fields(item)
     payload.update(watch)
     payload["jellyfin_id"] = item.get("Id")
+    if item.get("CommunityRating") is not None:
+        payload["jellyfin_rating"] = item.get("CommunityRating")
     return payload
