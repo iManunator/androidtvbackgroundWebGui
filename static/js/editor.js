@@ -1107,6 +1107,7 @@ async function fetchMediaData(itemId = null) {
         if (btnSaveGallery) btnSaveGallery.disabled = false;
 
         if (!isBatchRunning) indicator.innerText = "Source: " + data.source;
+        updateSeerrLogoToggleUi();
     } catch (err) { console.error(err); indicator.innerText = "Error loading preview"; }
     finally {
         btn.disabled = false;
@@ -1121,6 +1122,19 @@ function isSeerrMedia(data) {
     return id.startsWith('jellyseerr-') || id.startsWith('seerr-') || !!data.seerr_url || src.startsWith('Seerr') || src === 'Jellyseerr';
 }
 
+function isSeerrLogoEnabled() {
+    try {
+        const v = localStorage.getItem('tvb_seerr_logo_visible');
+        return v === null ? true : (v === '1' || v === 'true');
+    } catch (e) {
+        return true;
+    }
+}
+
+function setSeerrLogoEnabled(on) {
+    try { localStorage.setItem('tvb_seerr_logo_visible', on ? '1' : '0'); } catch (e) {}
+}
+
 function shouldShowSeerrBadge(data) {
     if (!isSeerrMedia(data)) return false;
     const avail = data.availability;
@@ -1131,6 +1145,10 @@ function shouldShowSeerrBadge(data) {
 function ensureSeerrProviderBadge(data) {
     if (!canvas || !shouldShowSeerrBadge(data)) return false;
     const existing = canvas.getObjects().find(o => o.dataTag === 'provider_source');
+    if (!isSeerrLogoEnabled()) {
+        if (existing) existing.set('visible', false);
+        return false;
+    }
     if (existing) {
         existing.set('visible', true);
         return false;
@@ -1168,13 +1186,52 @@ function ensureSeerrProviderBadge(data) {
     return true;
 }
 
+function updateSeerrLogoToggleUi() {
+    const btn = document.getElementById('btn-toggle-seerr-logo');
+    if (!btn) return;
+    const shuffleSel = document.getElementById('shuffleProvider');
+    const show = isSeerrMedia(lastFetchedData) || (shuffleSel && shuffleSel.value === 'jellyseerr');
+    btn.style.display = show ? 'inline-flex' : 'none';
+    const on = isSeerrLogoEnabled();
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.title = on ? 'Hide Seerr logo on wallpaper' : 'Show Seerr logo on wallpaper';
+}
+
+function toggleSeerrLogo() {
+    const next = !isSeerrLogoEnabled();
+    setSeerrLogoEnabled(next);
+    if (!canvas) {
+        updateSeerrLogoToggleUi();
+        return;
+    }
+    const badge = canvas.getObjects().find(o => o.dataTag === 'provider_source');
+    if (next) {
+        if (shouldShowSeerrBadge(lastFetchedData)) {
+            const added = ensureSeerrProviderBadge(lastFetchedData);
+            if (added || badge) previewTemplate(lastFetchedData);
+            const b = canvas.getObjects().find(o => o.dataTag === 'provider_source');
+            if (b) b.set('visible', true);
+        } else if (badge) {
+            badge.set('visible', true);
+        }
+    } else if (badge) {
+        badge.set('visible', false);
+    }
+    canvas.requestRenderAll();
+    saveToLocalStorage();
+    updateSeerrLogoToggleUi();
+}
+
 function addSeerrAvailabilityBadge() {
     if (!lastFetchedData) return;
+    setSeerrLogoEnabled(true);
     if (ensureSeerrProviderBadge(lastFetchedData)) {
         previewTemplate(lastFetchedData);
     } else if (shouldShowSeerrBadge(lastFetchedData)) {
         previewTemplate(lastFetchedData);
     }
+    updateSeerrLogoToggleUi();
 }
 
 function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
@@ -3203,6 +3260,7 @@ function init() {
             }
         } catch (e) {}
     }
+    updateSeerrLogoToggleUi();
 
     // Set initial mobile title
     const activeLink = document.querySelector('.tab-link.active');

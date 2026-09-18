@@ -498,6 +498,34 @@
             gap: 5px;
         }
 
+        .btn-seerr-logo-toggle {
+            display: none;
+            align-items: center;
+            gap: 7px;
+            padding: 6px 12px 6px 8px;
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 999px;
+            background: #2a2a2a;
+            color: #eee;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            opacity: 0.45;
+            transition: opacity 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+        }
+
+        .btn-seerr-logo-toggle.active {
+            opacity: 1;
+            background: #1e2a33;
+            border-color: rgba(94, 186, 201, 0.55);
+        }
+
+        .btn-seerr-logo-toggle img {
+            width: 18px;
+            height: 18px;
+            object-fit: contain;
+        }
+
         #toolsToggle {
             display: none;
         }
@@ -1226,7 +1254,8 @@
                         <div class="tool-group">
                             <select id="shuffleProvider"
                                 style="padding: 8px 10px; border-radius: 4px; border: 1px solid #555; background: #333; color: white; cursor: pointer;"
-                                title="Shuffle source">
+                                title="Shuffle source"
+                                onchange="try{localStorage.setItem('tvb_shuffle_provider', this.value);}catch(e){} updateSeerrLogoToggleUi();">
                                 <option value="jellyfin">Jellyfin</option>
                                 <option value="jellyseerr">Seerr</option>
                                 <option value="plex">Plex</option>
@@ -1235,6 +1264,11 @@
                             <button id="btn-shuffle" onclick="fetchRandomPreview()"
                                 style="background: #1565c0; padding: 8px 15px; border: none; border-radius: 4px; color: white; cursor: pointer; box-shadow: 0 2px 5px rgba(0,0,0,0.5);"
                                 data-i18n="shuffle_preview">🎲 <span>Shuffle Preview</span></button>
+                            <button id="btn-toggle-seerr-logo" class="btn-seerr-logo-toggle" onclick="toggleSeerrLogo()"
+                                type="button" aria-pressed="true" title="Toggle Seerr logo on wallpaper">
+                                <img src="/static/provider_logos/seerrlogo.png" alt="" aria-hidden="true">
+                                <span>Seerr logo</span>
+                            </button>
                             <span id="source-indicator"
                                 style="font-size: 11px; color: #aaa; text-shadow: 1px 1px 2px black;">Source:
                                 None</span>
