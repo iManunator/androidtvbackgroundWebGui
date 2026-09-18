@@ -1461,6 +1461,36 @@ function getCertificationFilename(rating) {
         const objsToRemove = canvas.getObjects().filter(o => o.dataTag === 'fade_effect' || o.dataTag === 'separator' || o.dataTag === 'row_separator');
         objsToRemove.forEach(o => canvas.remove(o));
 
+        // Auto-mark Seerr titles that are not in the library
+        const seerrSrc = String(data.source || '');
+        const isSeerr = String(data.id || '').startsWith('jellyseerr-') || !!data.seerr_url || seerrSrc.startsWith('Seerr') || seerrSrc === 'Jellyseerr';
+        const seerrNotInLibrary = isSeerr && data.availability !== 'available' && data.availability !== 'partial';
+        if (seerrNotInLibrary && !canvas.getObjects().some(o => o.dataTag === 'provider_source')) {
+            const marginLeft = 50;
+            const elements = canvas.getObjects().filter(o => o.dataTag && o.dataTag !== 'background' && o.dataTag !== 'fade_effect' && o.dataTag !== 'ambilight_bg');
+            let left = marginLeft;
+            let top = (canvas.height || 1080) * 0.82;
+            const title = elements.find(o => o.dataTag === 'title');
+            if (title) left = title.left;
+            if (elements.length) {
+                let maxBottom = 0;
+                elements.forEach(el => {
+                    const bottom = el.top + el.getScaledHeight();
+                    if (bottom > maxBottom) maxBottom = bottom;
+                });
+                top = maxBottom + 24;
+            }
+            const fontSize = (canvas.height || 1080) >= 2000 ? 48 : 32;
+            canvas.add(new fabric.IText('Not in library', {
+                left, top,
+                fontFamily: 'Roboto',
+                fontSize,
+                fill: 'white',
+                shadow: '2px 2px 10px rgba(0,0,0,0.8)',
+                dataTag: 'provider_source'
+            }));
+        }
+
         canvas.getObjects().forEach(obj => {
             if (!obj.dataTag) return;
             let val = undefined;
@@ -1614,11 +1644,11 @@ function getCertificationFilename(rating) {
                         providerLogo = "traktlogo.png";
                     } else if (source && (String(source).startsWith('Seerr') || source === 'Jellyseerr')) {
                         if (avail === 'available' || avail === 'partial') {
-                            providerText = "Available on ";
+                            providerText = "In library · ";
                         } else if (avail === 'pending' || avail === 'processing' || String(source).includes('Pending')) {
-                            providerText = "Requested on ";
+                            providerText = "Requested · ";
                         } else {
-                            providerText = "Request ";
+                            providerText = "Not in library · ";
                         }
                         providerLogo = "seerrlogo.png";
                     } else if (['Sonarr', 'Radarr', 'Jellyseerr'].includes(source) || (source && source.includes('Missing'))) {

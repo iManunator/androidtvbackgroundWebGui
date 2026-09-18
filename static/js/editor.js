@@ -1087,6 +1087,7 @@ async function fetchMediaData(itemId = null) {
         }
 
         await autoDetectBgColor(true, true);
+        ensureSeerrProviderBadge(data);
         await previewTemplate(data, true, newLogoImg);
         saveToLocalStorage();
         canvas.renderAll(); // Force synchronous render to ensure image is ready
@@ -1102,7 +1103,6 @@ async function fetchMediaData(itemId = null) {
         if (btnSaveGallery) btnSaveGallery.disabled = false;
 
         if (!isBatchRunning) indicator.innerText = "Source: " + data.source;
-        updateSeerrUi(data);
     } catch (err) { console.error(err); indicator.innerText = "Error loading preview"; }
     finally {
         btn.disabled = false;
@@ -1117,61 +1117,59 @@ function isSeerrMedia(data) {
     return id.startsWith('jellyseerr-') || id.startsWith('seerr-') || !!data.seerr_url || src.startsWith('Seerr') || src === 'Jellyseerr';
 }
 
-function updateSeerrUi(data) {
-    const btn = document.getElementById('btn-request-seerr');
-    if (!btn) return;
-    if (data && data.can_request && data.tmdb_id) {
-        btn.style.display = 'inline-flex';
-    } else {
-        btn.style.display = 'none';
+function shouldShowSeerrBadge(data) {
+    if (!isSeerrMedia(data)) return false;
+    const avail = data.availability;
+    // Show on wallpaper when not already in the library
+    return avail !== 'available' && avail !== 'partial';
+}
+
+function ensureSeerrProviderBadge(data) {
+    if (!canvas || !shouldShowSeerrBadge(data)) return false;
+    const existing = canvas.getObjects().find(o => o.dataTag === 'provider_source');
+    if (existing) {
+        existing.set('visible', true);
+        return false;
     }
+
+    // Place under title / lowest metadata row so it reads as part of the wallpaper
+    const is4K = document.getElementById('resSelect') && document.getElementById('resSelect').value === '2160';
+    const fontSize = is4K ? 48 : 32;
+    const marginLeft = parseInt(document.getElementById('marginLeftInput')?.value) || 50;
+    const elements = canvas.getObjects().filter(o => o.dataTag && o !== mainBg && o.visible && o.dataTag !== 'background' && o.dataTag !== 'fade_effect' && o.dataTag !== 'ambilight_bg');
+    let left = marginLeft;
+    let top = (canvas.height || 1080) * 0.82;
+    const title = elements.find(o => o.dataTag === 'title');
+    if (title) left = title.left;
+    if (elements.length) {
+        let maxBottom = 0;
+        elements.forEach(el => {
+            const bottom = el.top + el.getScaledHeight();
+            if (bottom > maxBottom) maxBottom = bottom;
+        });
+        top = maxBottom + 24;
+    }
+
+    const placeholder = new fabric.IText('Not in library', {
+        left,
+        top,
+        fontFamily: 'Roboto',
+        fontSize,
+        fill: 'white',
+        shadow: '2px 2px 10px rgba(0,0,0,0.8)',
+        dataTag: 'provider_source',
+        editable: false
+    });
+    canvas.add(placeholder);
+    return true;
 }
 
 function addSeerrAvailabilityBadge() {
-    if (!canvas) return;
-    if (!isSeerrMedia(lastFetchedData)) {
-        alert('Load a Seerr title first (Shuffle → Seerr).');
-        return;
-    }
-    const existing = canvas.getObjects().find(o => o.dataTag === 'provider_source');
-    if (!existing) {
-        addMetadataTag('provider_source', 'Request ');
-    }
-    previewTemplate(lastFetchedData);
-}
-
-async function requestCurrentViaSeerr() {
-    if (!lastFetchedData || !lastFetchedData.tmdb_id) {
-        alert('No Seerr requestable item loaded.');
-        return;
-    }
-    if (!lastFetchedData.can_request) {
-        alert('This title cannot be requested (already available or pending).');
-        return;
-    }
-    const mt = lastFetchedData.media_type || 'movie';
-    if (!confirm(`Request "${lastFetchedData.title}" via Seerr?`)) return;
-    try {
-        const r = await fetch('/api/seerr/request', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ media_type: mt, media_id: lastFetchedData.tmdb_id, seasons: 'all' })
-        });
-        const data = await r.json();
-        if (!r.ok || data.status === 'error') {
-            alert('❌ Request failed: ' + (data.message || JSON.stringify(data)));
-            return;
-        }
-        alert('✅ Request submitted to Seerr');
-        lastFetchedData.can_request = false;
-        lastFetchedData.availability = 'pending';
-        lastFetchedData.availability_label = 'Pending';
-        lastFetchedData.source = 'Seerr Pending';
-        updateSeerrUi(lastFetchedData);
-        const indicator = document.getElementById('source-indicator');
-        if (indicator) indicator.innerText = 'Source: Seerr Pending';
-    } catch (e) {
-        alert('❌ Network error requesting via Seerr');
+    if (!lastFetchedData) return;
+    if (ensureSeerrProviderBadge(lastFetchedData)) {
+        previewTemplate(lastFetchedData);
+    } else if (shouldShowSeerrBadge(lastFetchedData)) {
+        previewTemplate(lastFetchedData);
     }
 }
 
@@ -1412,11 +1410,11 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                             pLogo = "traktlogo.png";
                         } else if (srcVal && (srcVal.startsWith('Seerr') || srcVal === 'Jellyseerr')) {
                             if (avail === 'available' || avail === 'partial') {
-                                pText = "Available on ";
+                                pText = "In library · ";
                             } else if (avail === 'pending' || avail === 'processing' || (srcVal && srcVal.includes('Pending'))) {
-                                pText = "Requested on ";
+                                pText = "Requested · ";
                             } else {
-                                pText = "Request ";
+                                pText = "Not in library · ";
                             }
                             pLogo = "seerrlogo.png";
                         } else if (['Sonarr', 'Radarr', 'Jellyseerr'].includes(srcVal) || (srcVal && srcVal.includes('Missing'))) {
