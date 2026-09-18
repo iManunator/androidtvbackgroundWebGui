@@ -2146,6 +2146,27 @@
                         data-i18n="save_settings">Save Settings</button>
                 </div>
 
+                <div class="settings-panel settings-compact-panel" id="set-group-motion">
+                    <h3 onclick="toggleGroup('set-group-motion')"><span class="group-arrow">▼</span> Motion wallpapers (3D-feel)</h3>
+                    <div class="group-content">
+                        <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+                            <input type="checkbox" id="set-motion-enabled" style="width:18px; height:18px; margin:0;"
+                                {% if config.general.motion_wallpapers %}checked{% endif %}>
+                            <label for="set-motion-enabled" style="margin:0; cursor:pointer;">Bake short video loops when saving wallpapers</label>
+                        </div>
+                        <label for="set-motion-quality">Quality preset</label>
+                        <select id="set-motion-quality">
+                            <option value="light" {% if (config.general.motion_quality or 'light') == 'light' %}selected{% endif %}>Light (1080p ~1.8 Mbps, 3s)</option>
+                            <option value="standard" {% if (config.general.motion_quality or 'light') == 'standard' %}selected{% endif %}>Standard (1080p ~2.8 Mbps, 4s)</option>
+                        </select>
+                        <p style="font-size:11px; color:#888; margin:8px 0 10px; line-height:1.4;">
+                            Requires ffmpeg in the container. Projectivy plays these as VIDEO wallpapers (HW decode). JPEG is always kept as fallback.
+                        </p>
+                        <button type="button" onclick="backfillMotionWallpapers()"
+                            style="margin-top: 4px; background-color: #5c6bc0; width: 100%;">Generate missing motion clips</button>
+                    </div>
+                </div>
+
                 <div class="settings-panel settings-compact-panel" id="set-group-jf">
                     <h3 onclick="toggleGroup('set-group-jf')"><span class="group-arrow">▼</span> Jellyfin</h3>
                     <div class="group-content">

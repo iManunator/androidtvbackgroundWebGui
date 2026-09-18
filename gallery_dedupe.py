@@ -187,7 +187,7 @@ def delete_bases(layout_dir: str, bases: Iterable[str]) -> int:
     for base in bases:
         if not base:
             continue
-        for ext in (".jpg", ".json", ".ambilight.jpg"):
+        for ext in (".jpg", ".json", ".ambilight.jpg", ".mp4"):
             path = os.path.join(layout_dir, base + ext)
             try:
                 if os.path.exists(path):

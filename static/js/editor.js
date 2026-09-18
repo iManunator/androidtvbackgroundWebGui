@@ -6799,6 +6799,11 @@ async function saveSettings() {
             Object.assign(currentConfig.sonarr, config.sonarr);
             Object.assign(currentConfig.jellyseerr, config.jellyseerr);
             Object.assign(currentConfig.trakt, config.trakt);
+            if (!currentConfig.general) currentConfig.general = {};
+            const motionEl = document.getElementById('set-motion-enabled');
+            const qualityEl = document.getElementById('set-motion-quality');
+            if (motionEl) currentConfig.general.motion_wallpapers = !!motionEl.checked;
+            if (qualityEl) currentConfig.general.motion_quality = qualityEl.value || 'light';
 
             await fetch('/api/settings', {
                 method: 'POST',
@@ -6817,6 +6822,35 @@ async function saveSettings() {
     } catch (e) {
         console.error("Error saving settings:", e);
         alert("Failed to save settings.");
+    }
+}
+
+async function backfillMotionWallpapers() {
+    const qualityEl = document.getElementById('set-motion-quality');
+    const quality = qualityEl ? qualityEl.value : 'light';
+    const status = document.getElementById('statusMessage');
+    if (status) status.textContent = 'Generating motion clips…';
+    try {
+        const r = await fetch('/api/wallpaper/generate-motion', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ quality, force: false })
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.message || 'request failed');
+        if (!data.ffmpeg) {
+            alert('ffmpeg is not installed in this container. Rebuild/redeploy the WebGUI image that includes ffmpeg.');
+            return;
+        }
+        const summary = (data.results || []).map(x =>
+            `${x.layout}: +${x.created} created, ${x.skipped} skipped, ${x.failed} failed`
+        ).join('\n') || 'No layouts found';
+        alert(summary);
+        if (status) status.textContent = 'Motion backfill done';
+    } catch (e) {
+        console.error(e);
+        alert('Motion backfill failed: ' + e.message);
+        if (status) status.textContent = 'Motion backfill failed';
     }
 }
 

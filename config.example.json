@@ -1,7 +1,9 @@
 {
     "general": {
         "overwrite_existing": false,
-        "timezone_offset": 1
+        "timezone_offset": 1,
+        "motion_wallpapers": false,
+        "motion_quality": "light"
     },
     "jellyfin": {
         "url": "http://your-ip:8096",

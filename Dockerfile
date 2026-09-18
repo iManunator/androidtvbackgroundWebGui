@@ -24,6 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     dos2unix \
     git \
     python3-dev \
+    ffmpeg \
     # Clean up apt-get cache to keep the image small
     && rm -rf /var/lib/apt/lists/*
 

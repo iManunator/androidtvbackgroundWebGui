@@ -36,7 +36,7 @@ For **Projectivy Launcher**, use the dedicated plugin:
 
 **[Projectivy TVBG Suite Plugin](https://github.com/iManunator/projectivy-tvbgsuite-plugin)** (fork) · upstream [z9m](https://github.com/z9m/projectivy-tvbgsuite-plugin)
 
-Wallpaper pick modes use `/api/wallpaper/status` with `sort`, `pool`, and `exclude` (v1.6.1+). After updating, rebuild the metadata cache so watch/library fields are available.
+Wallpaper pick modes use `/api/wallpaper/status` with `sort`, `pool`, and `exclude` (v1.6.1+). Optional **motion wallpapers** (v1.7+) bake short Ken-Burns MP4s beside JPEGs (`mediaType` / `videoUrl`); enable under Settings → Motion wallpapers (requires ffmpeg). After updating, rebuild the metadata cache so watch/library fields are available.
 
 ---
 

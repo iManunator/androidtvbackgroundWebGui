@@ -1,4 +1,4 @@
-CURRENT_VERSION = "1.6.3"
+CURRENT_VERSION = "1.7.0"
 import os
 import sys
 import json
@@ -342,7 +342,12 @@ seed_bundled_layouts()
 # --- CONFIGURATION LOGIC ---
 def load_config():
     defaults = {
-        "general": {"overwrite_existing": False, "timezone_offset": 1},
+        "general": {
+            "overwrite_existing": False,
+            "timezone_offset": 1,
+            "motion_wallpapers": False,
+            "motion_quality": "light",
+        },
         "jellyfin": {"url": "", "api_key": "", "user_id": "", "excluded_libraries": ""},
         "plex": {"url": "", "token": ""},
         "tmdb": {"api_key": "", "language": "de-DE"},
@@ -2486,7 +2491,7 @@ def _scan_layout_images(layout_dir: str, layout_name: str):
 
 
 def _wallpaper_public_url(layout_name: str, rel_filename: str):
-    """Stable image URL without 'Layout: ' (colon breaks some Android image loaders)."""
+    """Stable media URL without 'Layout: ' (colon breaks some Android image loaders)."""
     return url_for(
         "gui_editor.get_wallpaper_image",
         layout=layout_name,
@@ -2495,9 +2500,22 @@ def _wallpaper_public_url(layout_name: str, rel_filename: str):
     )
 
 
+def _mp4_sibling(jpg_path: str):
+    if not jpg_path:
+        return None
+    root, _ = os.path.splitext(jpg_path)
+    mp4 = root + ".mp4"
+    try:
+        if os.path.isfile(mp4) and os.path.getsize(mp4) > 1000:
+            return mp4
+    except OSError:
+        pass
+    return None
+
+
 @gui_editor_bp.route('/api/wallpaper/image/<path:layout>/<path:filename>')
 def get_wallpaper_image(layout, filename):
-    """Serve a wallpaper JPEG by layout name (no colon in URL)."""
+    """Serve a wallpaper JPEG/MP4 by layout name (no colon in URL)."""
     base_path = os.path.dirname(os.path.abspath(__file__))
     safe_layout, layout_dir = _resolve_layout_dir(base_path, layout)
     if not layout_dir or not os.path.isdir(layout_dir):
@@ -2530,6 +2548,8 @@ def get_wallpaper_status():
 
     response = {
         "imageUrl": None,
+        "videoUrl": None,
+        "mediaType": "image",
         "actionUrl": None,
         "title": None,
         "path": None,
@@ -2677,6 +2697,12 @@ def get_wallpaper_status():
             response["actionUrl"] = selected.get("action_url")
             response["title"] = selected.get("title")
             response["path"] = rel
+            mp4 = _mp4_sibling(jpg)
+            if mp4:
+                rel_mp4 = os.path.relpath(mp4, layout_dir).replace("\\", "/")
+                response["videoUrl"] = _wallpaper_public_url(safe_layout, rel_mp4)
+                # Advertise video when a clip exists; plugin decides whether to prefer it
+                response["mediaType"] = "video"
 
     return jsonify(response)
 
@@ -2755,7 +2781,7 @@ def delete_all_gallery_images():
     try:
         for filename in os.listdir(target_dir):
             file_path = os.path.join(target_dir, filename)
-            if os.path.isfile(file_path) and filename.lower().endswith(('.jpg', '.jpeg', '.png', '.json')):
+            if os.path.isfile(file_path) and filename.lower().endswith(('.jpg', '.jpeg', '.png', '.json', '.mp4')):
                 os.remove(file_path)
         
         # Check if directory is empty and remove it if so (only for subfolders)
@@ -2886,12 +2912,57 @@ def save_editor_image():
         if metadata:
             update_metadata_cache(metadata, filepath, safe_layout)
 
+        # Optional motion clip for Projectivy VIDEO wallpapers
+        try:
+            import motion_wallpaper
+            motion_wallpaper.maybe_generate_after_save(filepath, load_config())
+        except Exception as e:
+            print(f"WARN: motion wallpaper hook failed: {e}")
+
         # Update global variable for preview
         LATEST_GENERATED_IMAGE = filepath
 
         return jsonify({"status": "success", "filename": filename})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@gui_editor_bp.route('/api/wallpaper/generate-motion', methods=['POST'])
+def generate_motion_wallpapers():
+    """Backfill short Ken-Burns MP4s for existing gallery JPEGs."""
+    import motion_wallpaper
+    data = request.json or {}
+    layout_name = data.get('layout') or data.get('layout_name') or ''
+    force = bool(data.get('force', False))
+    limit = int(data.get('limit') or 0)
+    quality = str(data.get('quality') or motion_wallpaper.motion_quality(load_config())).lower()
+    if quality not in ('light', 'standard'):
+        quality = 'light'
+
+    base_path = os.path.dirname(os.path.abspath(__file__))
+    results = []
+    if layout_name:
+        safe, layout_dir = _resolve_layout_dir(base_path, layout_name)
+        stats = motion_wallpaper.backfill_layout(layout_dir, quality=quality, force=force, limit=limit)
+        results.append({"layout": safe, **stats})
+    else:
+        root = os.path.join(base_path, "editor_backgrounds")
+        if os.path.isdir(root):
+            for entry in sorted(os.listdir(root)):
+                path = os.path.join(root, entry)
+                if not os.path.isdir(path):
+                    continue
+                stats = motion_wallpaper.backfill_layout(path, quality=quality, force=force, limit=limit)
+                results.append({"layout": entry, **stats})
+                if limit:
+                    # stop after first layout when limiting globally is ambiguous; honor per-layout
+                    pass
+
+    return jsonify({
+        "status": "success",
+        "ffmpeg": bool(motion_wallpaper.ffmpeg_bin()),
+        "results": results,
+    })
 
 
 @gui_editor_bp.route('/api/gallery/check_media', methods=['POST'])
