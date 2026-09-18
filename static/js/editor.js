@@ -1007,7 +1007,7 @@ async function fetchMediaData(itemId = null) {
     try {
         let url;
         if (itemId) {
-            url = `/api/media/item/${itemId}`;
+            url = `/api/media/item/${encodeURIComponent(itemId)}`;
         } else {
             const providerEl = document.getElementById('shuffleProvider');
             const provider = (providerEl && providerEl.value) ? providerEl.value : 'jellyfin';

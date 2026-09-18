@@ -124,7 +124,7 @@ async function startBatchProcess() {
 
     const layoutName = document.getElementById('batchLayoutSelect').value;
     const mode = document.getElementById('batchMode').value;
-    const filterMode = document.getElementById('batchFilterMode').value;
+    let filterMode = document.getElementById('batchFilterMode').value;
     const count = parseInt(document.getElementById('batchCount').value);
     const delay = 1500; // Fixed generous delay for stability
     const overwrite = document.getElementById('batchOverwrite').checked;
@@ -151,8 +151,8 @@ async function startBatchProcess() {
     if (dryRun) {
         logBatch(`[DRY RUN] Mode active. No images will be generated.`);
     }
-    if (cleanup && mode === 'library') {
-        logBatch(`[CLEANUP] Enabled. Missing files will be removed from library.`);
+    if (cleanup && (mode === 'library' || mode === 'trending')) {
+        logBatch(`[CLEANUP] Enabled. Titles not in this list will be removed.`);
     }
 
     let itemsToProcess = [];
@@ -161,17 +161,34 @@ async function startBatchProcess() {
         let limitVal = document.getElementById('batchMaxItems').value || '0';
 
         let selectedProviders = Array.from(document.querySelectorAll('input[name="batchProvider"]:checked')).map(cb => cb.value);
-        if (mode === 'trending') {
+        const seerrFilters = ['available', 'not_available', 'requestable'];
+        const wantsSeerr = mode === 'trending' || seerrFilters.includes(filterMode);
+
+        if (wantsSeerr) {
             if (!selectedProviders.includes('jellyseerr') && !selectedProviders.includes('seerr')) {
                 selectedProviders = ['jellyseerr'];
+                logBatch('Seerr mode: using Jellyseerr/Seerr provider.');
             }
-            filterMode = ['available', 'not_available', 'requestable'].includes(filterMode) ? filterMode : 'trending';
+            // Keep Seerr availability filters; otherwise use trending discover
+            if (!seerrFilters.includes(filterMode)) {
+                filterMode = 'trending';
+            }
         }
 
-        let qs = `?mode=${encodeURIComponent(mode === 'trending' ? 'trending' : filterMode)}&types=${encodeURIComponent(mediaType)}&limit=${encodeURIComponent(limitVal)}&providers=${encodeURIComponent(selectedProviders.join(','))}`;
+        if (!selectedProviders.length) {
+            logBatch('Error: select at least one provider (or use Trending / Seerr filter).');
+            stopBatchProcess();
+            return;
+        }
 
-        if (mode === 'trending') {
-            qs += `&seerr_availability=${encodeURIComponent(['available','not_available','requestable'].includes(document.getElementById('batchFilterMode').value) ? document.getElementById('batchFilterMode').value : 'all')}`;
+        const listMode = (mode === 'trending' || wantsSeerr) ? 'trending' : filterMode;
+        let qs = `?mode=${encodeURIComponent(listMode)}&types=${encodeURIComponent(mediaType)}&limit=${encodeURIComponent(limitVal)}&providers=${encodeURIComponent(selectedProviders.join(','))}`;
+
+        if (wantsSeerr) {
+            const avail = seerrFilters.includes(document.getElementById('batchFilterMode').value)
+                ? document.getElementById('batchFilterMode').value
+                : 'all';
+            qs += `&seerr_availability=${encodeURIComponent(avail)}`;
             qs += `&seerr_time_window=week`;
         }
 
@@ -186,16 +203,21 @@ async function startBatchProcess() {
             qs += `&genre=${encodeURIComponent(document.getElementById('batchFilterCustomGenre').value)}`;
         }
 
-        logBatch(`Fetching ${mode} list (Filter: ${filterMode})...`);
+        logBatch(`Fetching ${mode} list (Filter: ${filterMode}, providers: ${selectedProviders.join(', ')})...`);
         const resp = await fetch('/api/media/list' + qs);
         const list = await resp.json();
         if (list.error) { logBatch("Error: " + list.error); stopBatchProcess(); return; }
+        if (!Array.isArray(list)) {
+            logBatch("Error: unexpected list response from server.");
+            stopBatchProcess();
+            return;
+        }
 
-        itemsToProcess = list.map(i => ({ id: i.Id, name: i.Name }));
+        itemsToProcess = list.map(i => ({ id: i.Id || i.id, name: i.Name || i.title || i.Id })).filter(i => i.id);
         logBatch(`Found ${itemsToProcess.length} matching items.`);
 
         if (itemsToProcess.length === 0) {
-            logBatch("No items found. Stopping.");
+            logBatch("No items found. Check Seerr URL/API key in Settings, and that Seerr (or Trending mode) is selected.");
             stopBatchProcess();
             return;
         }

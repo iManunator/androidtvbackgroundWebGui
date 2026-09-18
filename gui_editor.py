@@ -1,4 +1,4 @@
-CURRENT_VERSION = "1.6.0"
+CURRENT_VERSION = "1.6.1"
 import os
 import sys
 import json
@@ -73,6 +73,50 @@ def _save_metadata_cache_now():
     except Exception as e:
         print(f"Error saving metadata cache: {e}")
 
+def _meta_str(metadata, *keys):
+    for key in keys:
+        val = metadata.get(key)
+        if val is None or val == "":
+            continue
+        return str(val).strip()
+    return ""
+
+
+def _wallpaper_mtime(filepath):
+    """Best-effort mtime from jpg sibling or the metadata json itself."""
+    if not filepath:
+        return 0.0
+    candidates = []
+    if filepath.lower().endswith(".json"):
+        candidates.append(filepath[:-5] + ".jpg")
+        candidates.append(filepath)
+    else:
+        candidates.append(filepath)
+        candidates.append(os.path.splitext(filepath)[0] + ".json")
+    for path in candidates:
+        try:
+            if os.path.exists(path):
+                return float(os.path.getmtime(path))
+        except OSError:
+            continue
+    return 0.0
+
+
+def _normalize_source(source):
+    s = str(source or "").strip().lower()
+    if not s:
+        return ""
+    if "jellyfin" in s:
+        return "jellyfin"
+    if "jellyseerr" in s or s == "seerr" or "seerr" in s:
+        return "jellyseerr"
+    if "plex" in s:
+        return "plex"
+    if "tmdb" in s:
+        return "tmdb"
+    return s
+
+
 def _merge_metadata_to_cache(metadata, filepath=None, layout_name=None):
     """Merges new metadata into the in-memory sets."""
     if not metadata: return
@@ -107,6 +151,12 @@ def _merge_metadata_to_cache(metadata, filepath=None, layout_name=None):
                     rating = float(val)
                     break
                 except: pass
+
+        source_raw = _meta_str(metadata, 'source')
+        jellyfin_id = _meta_str(metadata, 'jellyfin_id')
+        item_id = _meta_str(metadata, 'id', 'Id')
+        if not jellyfin_id and item_id and _normalize_source(source_raw) == "jellyfin":
+            jellyfin_id = item_id
         
         image_entry = {
             "path": filepath,
@@ -116,7 +166,15 @@ def _merge_metadata_to_cache(metadata, filepath=None, layout_name=None):
             "year": metadata.get('year'),
             "rating": rating,
             "title": metadata.get('title'),
-            "action_url": metadata.get('action_url')
+            "action_url": metadata.get('action_url'),
+            "mtime": _wallpaper_mtime(filepath),
+            "watch_state": _meta_str(metadata, 'watch_state', 'watch_status'),
+            "library_state": _meta_str(metadata, 'library_state'),
+            "source": source_raw,
+            "source_norm": _normalize_source(source_raw),
+            "availability": _meta_str(metadata, 'availability'),
+            "jellyfin_id": jellyfin_id,
+            "tmdb_id": _meta_str(metadata, 'tmdb_id'),
         }
         METADATA_CACHE["images"].append(image_entry)
 
@@ -1410,7 +1468,7 @@ def fetch_tmdb_details(tmdb_id, media_type, config):
         }
     except: return {}
 
-@gui_editor_bp.route('/api/media/item/<item_id>')
+@gui_editor_bp.route('/api/media/item/<path:item_id>')
 def get_media_item(item_id):
     config = load_config()
     
