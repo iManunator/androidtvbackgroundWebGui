@@ -1598,12 +1598,26 @@ function getCertificationFilename(rating) {
                     if (obj.type === 'textbox') obj.fullMediaText = val || "";
                     break;
                 case 'genres':
-                    val = data.genres;
-                    if (val && settings.genreLimit) {
-                        const limit = parseInt(settings.genreLimit);
-                        if (!isNaN(limit) && limit > 0) val = val.split(',').slice(0, limit).join(',');
+                    if (data.genre_list && data.genre_list.length) {
+                        const limit = obj.maxItems || data.genre_list.length;
+                        val = data.genre_list.slice(0, limit).join(', ');
+                    } else {
+                        val = data.genres;
+                        if (val && settings.genreLimit) {
+                            const limit = parseInt(settings.genreLimit);
+                            if (!isNaN(limit) && limit > 0) val = val.split(',').slice(0, limit).join(',');
+                        }
                     }
                     break;
+                case 'tagline': val = data.tagline || null; break;
+                case 'status': val = data.status || data.availability_label || null; break;
+                case 'collection': val = data.collection || null; break;
+                case 'language': val = data.language || null; break;
+                case 'budget': val = data.budget || null; break;
+                case 'revenue': val = data.revenue || null; break;
+                case 'release_theatrical': val = data.release_theatrical || null; break;
+                case 'release_digital': val = data.release_digital || null; break;
+                case 'release_physical': val = data.release_physical || null; break;
                 case 'availability':
                 case 'availability_label':
                     val = data.availability_label || data.availability || '';
@@ -1629,7 +1643,72 @@ function getCertificationFilename(rating) {
                         val = null;
                     }
                     break;
-                case 'officialRating': val = data.officialRating; break;
+                case 'writers':
+                    if (data.writers && data.writers.length > 0) {
+                        const limit = obj.maxItems || data.writers.length;
+                        val = data.writers.slice(0, limit).join(', ');
+                    } else { val = null; }
+                    break;
+                case 'editors':
+                    if (data.editors && data.editors.length > 0) {
+                        const limit = obj.maxItems || data.editors.length;
+                        val = data.editors.slice(0, limit).join(', ');
+                    } else { val = null; }
+                    break;
+                case 'keywords':
+                    if (data.keywords && data.keywords.length > 0) {
+                        const limit = obj.maxItems || data.keywords.length;
+                        val = data.keywords.slice(0, limit).join(', ');
+                    } else { val = null; }
+                    break;
+                case 'studios':
+                    if (data.studios && data.studios.length > 0) {
+                        const limit = obj.maxItems || data.studios.length;
+                        val = data.studios.slice(0, limit).join(', ');
+                    } else { val = null; }
+                    break;
+                case 'countries':
+                    if (data.countries && data.countries.length > 0) {
+                        const limit = obj.maxItems || data.countries.length;
+                        val = data.countries.slice(0, limit).join(', ');
+                    } else { val = null; }
+                    break;
+                case 'seerr_imdb':
+                case 'seerr_rt':
+                case 'seerr_rt_audience':
+                case 'seerr_tmdb': {
+                    const scoreKey = obj.dataTag;
+                    let score = data[scoreKey];
+                    if (!score) {
+                        obj.set('visible', false);
+                        val = undefined;
+                        break;
+                    }
+                    let label = String(score);
+                    if (scoreKey !== 'seerr_imdb' && !label.includes('%')) label += '%';
+                    if (obj.type === 'group') {
+                        const t = obj.getObjects().find(o => o.type === 'i-text' || o.type === 'text');
+                        const img = obj.getObjects().find(o => o.type === 'image');
+                        if (t) {
+                            t.set('text', label);
+                            if (img) {
+                                const th = t.height * t.scaleY;
+                                img.scaleToHeight(th * 1.0);
+                                img.set({ top: 0, left: 0 });
+                                t.set({ left: (img.width * img.scaleX) + 15, top: 0 });
+                            }
+                            const preservedTop = obj.top;
+                            const preservedLeft = obj.left;
+                            obj.addWithUpdate();
+                            obj.set({ top: preservedTop, left: preservedLeft, visible: true, opacity: 1 });
+                        }
+                        val = undefined;
+                    } else {
+                        val = label;
+                    }
+                    break;
+                }
+                case 'officialRating': val = data.officialRating || data.certification; break;
                 case 'provider_source':
                     let providerText = "";
                     let providerLogo = null;

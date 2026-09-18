@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from jellyfin_auth import jellyfin_headers, jellyfin_image_url, jellyfin_items_base, resolve_jellyfin_user_id
 import seerr_client
-from gui_editor import load_config, save_config, fetch_tmdb_details
+from gui_editor import load_config, save_config, fetch_tmdb_details, format_seerr_item
 
 # Import the missing search trigger script
 try:
@@ -589,34 +589,9 @@ def fetch_seerr_cron(config, job):
             language=lang,
         )
         for it in items:
-            details = fetch_tmdb_details(str(it["tmdb_id"]), it["media_type"], config) or {}
-            mapped = {
-                "id": f"jellyseerr-{it['media_type']}-{it['tmdb_id']}",
-                "title": it.get("title") or details.get("title"),
-                "year": it.get("year") or details.get("year"),
-                "overview": it.get("overview") or details.get("overview") or "",
-                "rating": it.get("rating") or details.get("rating"),
-                "genres": it.get("genres") or details.get("genres") or "",
-                "runtime": it.get("runtime") or details.get("runtime"),
-                "actors": details.get("actors") or [],
-                "directors": details.get("directors") or [],
-                "imdb_id": details.get("imdb_id"),
-                "backdrop_url": seerr_client.tmdb_image_url(it.get("backdrop_path")) or details.get("backdrop_url"),
-                "logo_url": it.get("logo_url") or details.get("logo_url"),
-                "action_url": it.get("seerr_url"),
-                "seerr_url": it.get("seerr_url"),
-                "availability": it.get("availability"),
-                "availability_label": it.get("availability_label"),
-                "seerr_status": it.get("seerr_status"),
-                "in_library": it.get("in_library"),
-                "can_request": it.get("can_request"),
-                "tmdb_id": it.get("tmdb_id"),
-                "media_type": it.get("media_type"),
-                "source": "Seerr Requestable" if it.get("can_request") else (
-                    "Seerr Pending" if it.get("availability") in ("pending", "processing") else "Seerr"
-                ),
-            }
-            meta_items.append(mapped)
+            mapped = format_seerr_item(it, config)
+            if mapped:
+                meta_items.append(mapped)
     except Exception as e:
         log(f"Seerr cron fetch error: {e}")
     return meta_items

@@ -1,4 +1,4 @@
-CURRENT_VERSION = "1.2.9"
+CURRENT_VERSION = "1.3.0"
 import os
 import sys
 import json
@@ -703,41 +703,54 @@ def fetch_radarr_list(config, filter_mode='all'):
     return []
 
 def format_seerr_item(norm: dict, config: dict = None) -> dict:
-    """Turn normalized Seerr item into editor media payload."""
+    """Turn normalized Seerr item into editor media payload (full Seerr details)."""
     if not norm:
         return {}
     config = config or {}
-    backdrop = seerr_client.tmdb_image_url(norm.get("backdrop_path")) or seerr_client.tmdb_image_url(norm.get("poster_path"))
-    logo_url = norm.get("logo_url")
-    # Enrich via TMDB (uses configured key, or Seerr/Overseerr public fallback)
-    if not logo_url or not norm.get("actors") or not backdrop:
+    conf = seerr_client.get_seerr_conf(config)
+    mt = norm.get("media_type") or "movie"
+    tid = norm.get("tmdb_id")
+
+    enriched = {}
+    if conf.get("url") and conf.get("api_key") and tid is not None:
         try:
-            details = fetch_tmdb_details(str(norm["tmdb_id"]), norm["media_type"], config)
-            if details.get("logo_url"):
-                logo_url = details["logo_url"]
-            if not backdrop and details.get("backdrop_url"):
+            enriched = seerr_client.enrich_item(conf["url"], conf["api_key"], mt, int(tid), config) or {}
+        except Exception as e:
+            print(f"Seerr enrich error: {e}")
+            enriched = {}
+
+    # Merge: enriched details win for metadata; keep list-level availability if richer
+    merged = {**norm, **{k: v for k, v in enriched.items() if v not in (None, "", [], {})}}
+    # Prefer enriched lists even when empty was overwritten incorrectly
+    for list_key in ("actors", "directors", "writers", "editors", "keywords", "studios", "countries", "genre_list"):
+        if enriched.get(list_key):
+            merged[list_key] = enriched[list_key]
+    for str_key in (
+        "tagline", "status", "collection", "genres", "language", "budget", "revenue",
+        "certification", "officialRating", "release_theatrical", "release_digital", "release_physical",
+        "seerr_rt", "seerr_rt_audience", "seerr_imdb", "seerr_tmdb", "runtime", "overview", "imdb_id",
+    ):
+        if enriched.get(str_key) not in (None, ""):
+            merged[str_key] = enriched[str_key]
+
+    backdrop = seerr_client.tmdb_image_url(merged.get("backdrop_path") or norm.get("backdrop_path"))
+    backdrop = backdrop or seerr_client.tmdb_image_url(merged.get("poster_path") or norm.get("poster_path"))
+    logo_url = merged.get("logo_url") or norm.get("logo_url")
+
+    # Clearlogo still from TMDB images API (Seerr details don't include logos)
+    if not logo_url:
+        logo_url = fetch_tmdb_logo_url(str(tid), mt, config)
+    if not backdrop:
+        try:
+            details = fetch_tmdb_details(str(tid), mt, config)
+            if details.get("backdrop_url"):
                 backdrop = details["backdrop_url"]
-            if details.get("actors") and not norm.get("actors"):
-                norm["actors"] = details.get("actors")
-            if details.get("directors") and not norm.get("directors"):
-                norm["directors"] = details.get("directors")
-            if details.get("imdb_id"):
-                norm["imdb_id"] = details.get("imdb_id")
-            if details.get("runtime") and not norm.get("runtime"):
-                norm["runtime"] = details.get("runtime")
-            if details.get("genres") and not norm.get("genres"):
-                norm["genres"] = details.get("genres")
-            if details.get("overview") and not norm.get("overview"):
-                norm["overview"] = details.get("overview")
+            if details.get("logo_url") and not logo_url:
+                logo_url = details["logo_url"]
         except Exception:
             pass
-    if not logo_url:
-        logo_url = fetch_tmdb_logo_url(norm.get("tmdb_id"), norm.get("media_type"), config)
 
-    mt = norm["media_type"]
-    tid = norm["tmdb_id"]
-    avail = norm.get("availability") or "not_available"
-    source = "Seerr"
+    avail = merged.get("availability") or "not_available"
     if avail == "available" or avail == "partial":
         source = "Seerr"
     elif avail in ("pending", "processing"):
@@ -745,28 +758,53 @@ def format_seerr_item(norm: dict, config: dict = None) -> dict:
     else:
         source = "Seerr Requestable"
 
+    genres = merged.get("genres") or ""
+    if not genres and merged.get("genre_list"):
+        genres = ", ".join(merged["genre_list"])
+
     return {
         "id": f"jellyseerr-{mt}-{tid}",
-        "title": norm.get("title"),
-        "year": norm.get("year"),
-        "rating": norm.get("rating"),
-        "overview": norm.get("overview") or "",
-        "genres": norm.get("genres") or "",
-        "actors": norm.get("actors") or [],
-        "directors": norm.get("directors") or [],
-        "runtime": norm.get("runtime"),
+        "title": merged.get("title"),
+        "year": merged.get("year"),
+        "rating": merged.get("rating"),
+        "overview": merged.get("overview") or "",
+        "tagline": merged.get("tagline") or "",
+        "status": merged.get("status") or "",
+        "collection": merged.get("collection") or "",
+        "genres": genres,
+        "genre_list": merged.get("genre_list") or [],
+        "actors": merged.get("actors") or [],
+        "directors": merged.get("directors") or [],
+        "writers": merged.get("writers") or [],
+        "editors": merged.get("editors") or [],
+        "keywords": merged.get("keywords") or [],
+        "studios": merged.get("studios") or [],
+        "countries": merged.get("countries") or [],
+        "language": merged.get("language") or "",
+        "budget": merged.get("budget") or "",
+        "revenue": merged.get("revenue") or "",
+        "runtime": merged.get("runtime"),
+        "certification": merged.get("certification") or "",
+        "officialRating": merged.get("officialRating") or merged.get("certification") or "",
+        "release_theatrical": merged.get("release_theatrical") or "",
+        "release_digital": merged.get("release_digital") or "",
+        "release_physical": merged.get("release_physical") or "",
+        "seerr_rt": merged.get("seerr_rt") or "",
+        "seerr_rt_audience": merged.get("seerr_rt_audience") or "",
+        "seerr_imdb": merged.get("seerr_imdb") or "",
+        "seerr_tmdb": merged.get("seerr_tmdb") or "",
         "backdrop_url": backdrop,
         "logo_url": logo_url,
-        "imdb_id": norm.get("imdb_id"),
+        "imdb_id": merged.get("imdb_id"),
         "provider_ids": {"Tmdb": str(tid)},
         "source": source,
         "availability": avail,
-        "availability_label": norm.get("availability_label"),
-        "seerr_status": norm.get("seerr_status"),
-        "in_library": norm.get("in_library"),
-        "can_request": norm.get("can_request"),
-        "seerr_url": norm.get("seerr_url"),
-        "action_url": norm.get("seerr_url"),
+        "availability_label": merged.get("availability_label"),
+        "seerr_status": merged.get("seerr_status"),
+        "in_library": merged.get("in_library"),
+        "can_request": merged.get("can_request"),
+        "seerr_url": merged.get("seerr_url") or norm.get("seerr_url"),
+        "action_url": merged.get("seerr_url") or norm.get("seerr_url"),
         "media_type": mt,
         "tmdb_id": tid,
     }

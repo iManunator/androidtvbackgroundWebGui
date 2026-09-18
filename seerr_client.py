@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import quote
 
 import requests
 
@@ -23,6 +23,16 @@ STATUS_LABELS = {
     STATUS_AVAILABLE: "Available",
     STATUS_DELETED: "Deleted",
 }
+
+# TMDB release types
+RELEASE_THEATRICAL_LIMITED = 2
+RELEASE_THEATRICAL = 3
+RELEASE_DIGITAL = 4
+RELEASE_PHYSICAL = 5
+
+_DETAIL_CACHE: Dict[str, Tuple[float, dict]] = {}
+_RATINGS_CACHE: Dict[str, Tuple[float, dict]] = {}
+_CACHE_TTL_SEC = 600
 
 
 def seerr_headers(api_key: str) -> Dict[str, str]:
@@ -124,13 +134,40 @@ def trending(
 
 def media_details(base_url: str, api_key: str, media_type: str, tmdb_id: int) -> dict:
     mt = "tv" if media_type in ("tv", "show", "series") else "movie"
+    cache_key = f"{mt}:{int(tmdb_id)}"
+    now = time.time()
+    cached = _DETAIL_CACHE.get(cache_key)
+    if cached and (now - cached[0]) < _CACHE_TTL_SEC:
+        return cached[1]
     r = requests.get(
         f"{base_url.rstrip('/')}/api/v1/{mt}/{int(tmdb_id)}",
         headers=seerr_headers(api_key),
         timeout=15,
     )
     r.raise_for_status()
-    return r.json()
+    data = r.json()
+    _DETAIL_CACHE[cache_key] = (now, data)
+    return data
+
+
+def ratings_combined(base_url: str, api_key: str, media_type: str, tmdb_id: int) -> dict:
+    mt = "tv" if media_type in ("tv", "show", "series") else "movie"
+    cache_key = f"{mt}:{int(tmdb_id)}"
+    now = time.time()
+    cached = _RATINGS_CACHE.get(cache_key)
+    if cached and (now - cached[0]) < _CACHE_TTL_SEC:
+        return cached[1]
+    try:
+        r = requests.get(
+            f"{base_url.rstrip('/')}/api/v1/{mt}/{int(tmdb_id)}/ratingscombined",
+            headers=seerr_headers(api_key),
+            timeout=12,
+        )
+        data = r.json() if r.status_code == 200 and r.content else {}
+    except Exception:
+        data = {}
+    _RATINGS_CACHE[cache_key] = (now, data)
+    return data
 
 
 def create_request(
@@ -162,7 +199,6 @@ def create_request(
     except Exception:
         body = {"message": r.text}
     if r.status_code >= 400 and mt == "tv" and seasons == "all":
-        # Fallback: request seasons 1+ if "all" rejected
         payload["seasons"] = list(range(1, 21))
         r2 = requests.post(
             f"{base_url.rstrip('/')}/api/v1/request",
@@ -178,13 +214,252 @@ def create_request(
     return body, r.status_code
 
 
+def _crew_names(crew: List[dict], jobs: Tuple[str, ...]) -> List[str]:
+    names: List[str] = []
+    seen = set()
+    for c in crew or []:
+        job = (c.get("job") or "").strip()
+        name = (c.get("name") or "").strip()
+        if job in jobs and name and name not in seen:
+            seen.add(name)
+            names.append(name)
+    return names
+
+
+def _format_money(value: Any) -> str:
+    try:
+        n = int(value or 0)
+    except (TypeError, ValueError):
+        return ""
+    if n <= 0:
+        return ""
+    return f"${n:,}"
+
+
+def _format_date(iso: Optional[str]) -> str:
+    if not iso:
+        return ""
+    return str(iso)[:10]
+
+
+def _pick_region(config: Optional[dict]) -> str:
+    conf = get_seerr_conf(config or {})
+    region = (conf.get("discover_region") or conf.get("region") or "").strip().upper()
+    if len(region) == 2:
+        return region
+    lang = ((config or {}).get("tmdb") or {}).get("language") or "en-US"
+    parts = str(lang).replace("_", "-").split("-")
+    if len(parts) >= 2 and len(parts[1]) == 2:
+        return parts[1].upper()
+    return "US"
+
+
+def _release_entries(releases: Any, region: str) -> List[dict]:
+    results = []
+    if isinstance(releases, dict):
+        results = releases.get("results") or []
+    elif isinstance(releases, list):
+        results = releases
+    region_block = next((r for r in results if (r.get("iso_3166_1") or "").upper() == region), None)
+    if not region_block:
+        region_block = next((r for r in results if (r.get("iso_3166_1") or "").upper() == "US"), None)
+    if not region_block and results:
+        region_block = results[0]
+    if not region_block:
+        return []
+    return region_block.get("release_dates") or region_block.get("releaseDates") or []
+
+
+def _pick_release_date(entries: List[dict], types: Tuple[int, ...]) -> str:
+    for t in types:
+        for e in entries:
+            try:
+                et = int(e.get("type"))
+            except (TypeError, ValueError):
+                continue
+            date_val = e.get("release_date") or e.get("releaseDate")
+            if et == t and date_val:
+                return _format_date(date_val)
+    return ""
+
+
+def _pick_certification(entries: List[dict]) -> str:
+    for e in entries:
+        cert = (e.get("certification") or "").strip()
+        if cert:
+            return cert
+    return ""
+
+
+def flatten_details(detail: dict, ratings: Optional[dict] = None, region: str = "US") -> Dict[str, Any]:
+    """Flatten Seerr movie/tv detail + ratings into editor tag fields."""
+    if not detail:
+        return {}
+    ratings = ratings or {}
+    credits = detail.get("credits") or {}
+    cast = credits.get("cast") or []
+    crew = credits.get("crew") or []
+
+    genres = detail.get("genres") or []
+    if genres and isinstance(genres[0], dict):
+        genre_list = [g.get("name") for g in genres if g.get("name")]
+        genre_str = ", ".join(genre_list)
+    elif genres and isinstance(genres[0], str):
+        genre_list = list(genres)
+        genre_str = ", ".join(genres)
+    else:
+        genre_list = []
+        genre_str = ""
+
+    keywords = detail.get("keywords") or []
+    if keywords and isinstance(keywords[0], dict):
+        keyword_list = [k.get("name") for k in keywords if k.get("name")]
+    elif keywords and isinstance(keywords[0], str):
+        keyword_list = list(keywords)
+    else:
+        keyword_list = []
+
+    studios = [
+        c.get("name")
+        for c in (detail.get("productionCompanies") or detail.get("production_companies") or [])
+        if c.get("name")
+    ]
+    countries = [
+        c.get("name")
+        for c in (detail.get("productionCountries") or detail.get("production_countries") or [])
+        if c.get("name")
+    ]
+
+    actors = [a.get("name") for a in cast[:20] if a.get("name")]
+    directors = _crew_names(crew, ("Director",))
+    writers = _crew_names(crew, ("Writer", "Screenplay", "Story", "Teleplay"))
+    editors = _crew_names(crew, ("Editor", "Editorial Manager"))
+
+    media_type = "tv" if detail.get("name") and not detail.get("title") else "movie"
+    if detail.get("mediaType") in ("movie", "tv"):
+        media_type = detail["mediaType"]
+
+    runtime = None
+    if media_type == "movie":
+        rt = detail.get("runtime")
+        if rt:
+            h, m = divmod(int(rt), 60)
+            runtime = f"{h}h {m}min" if h else f"{m}min"
+    else:
+        seasons = detail.get("numberOfSeasons") or detail.get("seasonCount")
+        if seasons:
+            runtime = f"{seasons} Season{'s' if int(seasons) != 1 else ''}"
+        else:
+            ep_rt = detail.get("episodeRunTime") or detail.get("episode_run_time") or []
+            if isinstance(ep_rt, list) and ep_rt and ep_rt[0]:
+                runtime = f"{ep_rt[0]} min"
+
+    year_src = detail.get("releaseDate") or detail.get("firstAirDate") or ""
+    collection = detail.get("collection") or {}
+    collection_name = collection.get("name") if isinstance(collection, dict) else ""
+
+    lang = detail.get("originalLanguage") or detail.get("original_language") or ""
+    spoken = detail.get("spokenLanguages") or detail.get("spoken_languages") or []
+    if spoken and isinstance(spoken[0], dict):
+        lang_name = spoken[0].get("englishName") or spoken[0].get("name") or lang
+    else:
+        lang_name = lang
+
+    entries = _release_entries(detail.get("releases"), region)
+    cert = _pick_certification(entries)
+    release_theatrical = _pick_release_date(entries, (RELEASE_THEATRICAL, RELEASE_THEATRICAL_LIMITED))
+    release_digital = _pick_release_date(entries, (RELEASE_DIGITAL,))
+    release_physical = _pick_release_date(entries, (RELEASE_PHYSICAL,))
+
+    rt = ratings.get("rt") or {}
+    imdb = ratings.get("imdb") or {}
+    seerr_rt = rt.get("criticsScore")
+    seerr_rt_audience = rt.get("audienceScore")
+    seerr_imdb = imdb.get("criticsScore")
+    vote = detail.get("voteAverage") or detail.get("vote_average")
+    seerr_tmdb = None
+    if vote is not None:
+        try:
+            v = float(vote)
+            seerr_tmdb = int(round(v * 10)) if v <= 10 else int(round(v))
+        except (TypeError, ValueError):
+            seerr_tmdb = None
+
+    imdb_id = detail.get("imdbId") or detail.get("imdb_id")
+    ext = detail.get("externalIds") or detail.get("external_ids") or {}
+    if not imdb_id and isinstance(ext, dict):
+        imdb_id = ext.get("imdbId") or ext.get("imdb_id")
+
+    return {
+        "title": detail.get("title") or detail.get("name"),
+        "year": str(year_src)[:4] if year_src else None,
+        "overview": detail.get("overview") or "",
+        "tagline": detail.get("tagline") or "",
+        "status": detail.get("status") or "",
+        "collection": collection_name or "",
+        "genres": genre_str,
+        "genre_list": genre_list,
+        "runtime": runtime,
+        "actors": actors,
+        "directors": directors,
+        "writers": writers,
+        "editors": editors,
+        "keywords": keyword_list,
+        "studios": studios,
+        "countries": countries,
+        "language": lang_name or "",
+        "budget": _format_money(detail.get("budget")),
+        "revenue": _format_money(detail.get("revenue")),
+        "certification": cert,
+        "officialRating": cert,
+        "release_theatrical": release_theatrical,
+        "release_digital": release_digital,
+        "release_physical": release_physical,
+        "seerr_rt": str(seerr_rt) if seerr_rt is not None else "",
+        "seerr_rt_audience": str(seerr_rt_audience) if seerr_rt_audience is not None else "",
+        "seerr_imdb": str(seerr_imdb) if seerr_imdb is not None else "",
+        "seerr_tmdb": str(seerr_tmdb) if seerr_tmdb is not None else "",
+        "rating": vote,
+        "imdb_id": imdb_id,
+        "backdrop_path": detail.get("backdropPath") or detail.get("backdrop_path"),
+        "poster_path": detail.get("posterPath") or detail.get("poster_path"),
+        "media_info": detail.get("mediaInfo") or {},
+    }
+
+
+def enrich_item(
+    base_url: str,
+    api_key: str,
+    media_type: str,
+    tmdb_id: int,
+    config: Optional[dict] = None,
+) -> Dict[str, Any]:
+    """Fetch Seerr details + ratings and return flattened tag fields."""
+    region = _pick_region(config)
+    try:
+        detail = media_details(base_url, api_key, media_type, tmdb_id)
+    except Exception:
+        detail = {}
+    try:
+        ratings = ratings_combined(base_url, api_key, media_type, tmdb_id)
+    except Exception:
+        ratings = {}
+    flat = flatten_details(detail, ratings, region=region)
+    flat["media_type"] = "tv" if media_type in ("tv", "show", "series") else "movie"
+    flat["tmdb_id"] = int(tmdb_id)
+    if detail:
+        mapped = map_status(detail.get("mediaInfo"))
+        flat.update(mapped)
+        flat["seerr_url"] = deep_link(base_url, flat["media_type"], int(tmdb_id))
+    return flat
+
+
 def normalize_result(item: dict, base_url: str) -> Optional[dict]:
     """Normalize a Seerr discover/movie/tv payload into a common shape."""
     if not item or not isinstance(item, dict):
         return None
 
     media_type = item.get("mediaType") or item.get("type")
-    # movie details endpoint may not include mediaType
     if not media_type:
         if "title" in item and "name" not in item:
             media_type = "movie"
@@ -233,7 +508,6 @@ def normalize_result(item: dict, base_url: str) -> Optional[dict]:
             runtime = f"{seasons} Season{'s' if int(seasons) != 1 else ''}"
 
     logo_url = None
-    # Prefer TMDB logo from images if present on detail payloads
     images = item.get("images") or {}
     logos = images.get("logos") if isinstance(images, dict) else None
     if logos:
