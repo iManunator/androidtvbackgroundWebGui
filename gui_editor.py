@@ -1,4 +1,4 @@
-CURRENT_VERSION = "1.2.1"
+CURRENT_VERSION = "1.2.2"
 import os
 import sys
 import json
@@ -706,10 +706,11 @@ def format_seerr_item(norm: dict, config: dict = None) -> dict:
     """Turn normalized Seerr item into editor media payload."""
     if not norm:
         return {}
+    config = config or {}
     backdrop = seerr_client.tmdb_image_url(norm.get("backdrop_path")) or seerr_client.tmdb_image_url(norm.get("poster_path"))
     logo_url = norm.get("logo_url")
-    # Enrich logo via TMDB details when missing
-    if not logo_url and config:
+    # Enrich via TMDB (uses configured key, or Seerr/Overseerr public fallback)
+    if not logo_url or not norm.get("actors") or not backdrop:
         try:
             details = fetch_tmdb_details(str(norm["tmdb_id"]), norm["media_type"], config)
             if details.get("logo_url"):
@@ -730,6 +731,8 @@ def format_seerr_item(norm: dict, config: dict = None) -> dict:
                 norm["overview"] = details.get("overview")
         except Exception:
             pass
+    if not logo_url:
+        logo_url = fetch_tmdb_logo_url(norm.get("tmdb_id"), norm.get("media_type"), config)
 
     mt = norm["media_type"]
     tid = norm["tmdb_id"]
@@ -1060,9 +1063,64 @@ def format_plex_item(item, base_url, token):
         "source": "Plex"
     }
 
+# Public TMDB v3 key shipped by Seerr/Overseerr (GitHub). Used only when the user
+# has not configured their own key, so Seerr shuffle can still resolve clearlogos.
+_TMDB_FALLBACK_API_KEY = "431a8708161bcd1f1fbe7536137e61ed"
+
+
+def resolve_tmdb_api_key(config):
+    t = (config or {}).get("tmdb") or {}
+    return (t.get("api_key") or "").strip() or _TMDB_FALLBACK_API_KEY
+
+
+def pick_tmdb_logo_path(logos, language="en-US"):
+    """Prefer configured language, then English, then null-lang, then any; PNG over SVG."""
+    if not logos:
+        return None
+    lang = (language or "en").split("-")[0].lower()
+
+    def score(logo):
+        iso = (logo.get("iso_639_1") or "").lower()
+        path = logo.get("file_path") or ""
+        lang_score = 0
+        if iso == lang:
+            lang_score = 3
+        elif iso == "en":
+            lang_score = 2
+        elif not iso:
+            lang_score = 1
+        png_score = 1 if path.lower().endswith(".png") else 0
+        votes = float(logo.get("vote_average") or 0)
+        return (lang_score, png_score, votes)
+
+    best = max(logos, key=score)
+    return best.get("file_path")
+
+
+def fetch_tmdb_logo_url(tmdb_id, media_type, config):
+    """Lightweight logo-only lookup for Seerr / TMDB enrichment."""
+    api_key = resolve_tmdb_api_key(config)
+    if not api_key or not tmdb_id:
+        return None
+    mt = "tv" if str(media_type) in ("tv", "show", "series") else "movie"
+    lang = ((config or {}).get("tmdb") or {}).get("language") or "en-US"
+    try:
+        r = requests.get(
+            f"https://api.themoviedb.org/3/{mt}/{int(tmdb_id)}/images",
+            params={"api_key": api_key, "include_image_language": f"{lang.split('-')[0]},en,null"},
+            timeout=5,
+        )
+        if r.status_code != 200:
+            return None
+        path = pick_tmdb_logo_path(r.json().get("logos") or [], lang)
+        return f"https://image.tmdb.org/t/p/original{path}" if path else None
+    except Exception:
+        return None
+
+
 def fetch_tmdb_details(tmdb_id, media_type, config):
     t = config.get('tmdb', {})
-    api_key = t.get('api_key')
+    api_key = resolve_tmdb_api_key(config)
     if not api_key: return {}
     
     lang = t.get('language', 'en-US')
@@ -1083,14 +1141,15 @@ def fetch_tmdb_details(tmdb_id, media_type, config):
                     imdb_id = r_ext.json().get('imdb_id')
             except: pass
 
-        # 2. Images (for Logo)
+        # 2. Images (for Logo) — prefer UI language, then English
         logo_url = None
-        r_img = requests.get(f"{base_url}/{media_type}/{tmdb_id}/images?api_key={api_key}", timeout=5)
+        r_img = requests.get(
+            f"{base_url}/{media_type}/{tmdb_id}/images",
+            params={"api_key": api_key, "include_image_language": f"{lang.split('-')[0]},en,null"},
+            timeout=5,
+        )
         if r_img.status_code == 200:
-            logos = r_img.json().get('logos', [])
-            # Prefer English logos
-            en_logos = [l for l in logos if l.get('iso_639_1') == 'en']
-            logo_path = (en_logos[0] if en_logos else (logos[0] if logos else {})).get('file_path')
+            logo_path = pick_tmdb_logo_path(r_img.json().get('logos', []), lang)
             if logo_path:
                 logo_url = f"https://image.tmdb.org/t/p/original{logo_path}"
                 
