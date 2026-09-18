@@ -1481,7 +1481,7 @@ function getCertificationFilename(rating) {
                 top = maxBottom + 24;
             }
             const fontSize = (canvas.height || 1080) >= 2000 ? 48 : 32;
-            canvas.add(new fabric.IText('Not in library', {
+            canvas.add(new fabric.IText(' ', {
                 left, top,
                 fontFamily: 'Roboto',
                 fontSize,
@@ -1643,13 +1643,7 @@ function getCertificationFilename(rating) {
                         providerText = "Now on my watchlist ";
                         providerLogo = "traktlogo.png";
                     } else if (source && (String(source).startsWith('Seerr') || source === 'Jellyseerr')) {
-                        if (avail === 'available' || avail === 'partial') {
-                            providerText = "In library · ";
-                        } else if (avail === 'pending' || avail === 'processing' || String(source).includes('Pending')) {
-                            providerText = "Requested · ";
-                        } else {
-                            providerText = "Not in library · ";
-                        }
+                        providerText = "";
                         providerLogo = "seerrlogo.png";
                     } else if (['Sonarr', 'Radarr', 'Jellyseerr'].includes(source) || (source && source.includes('Missing'))) {
                         providerText = (source && source.includes('Missing')) ? "Requested on " : "Soon available on ";
@@ -1683,6 +1677,27 @@ function getCertificationFilename(rating) {
                                                 if (existingText.fontSize) currentSize = existingText.fontSize;
                                                 if (existingText.fill) currentFill = existingText.fill;
                                             }
+                                        } else if (obj.type === 'image' && obj.dataTag === 'provider_source') {
+                                            currentSize = obj.getScaledHeight() || currentSize;
+                                        }
+
+                                        // Logo-only (Seerr)
+                                        if (!providerText) {
+                                            img.scaleToHeight(currentSize * 1.35);
+                                            img.set({
+                                                left: obj.left,
+                                                top: obj.top,
+                                                originX: obj.originX || 'left',
+                                                originY: obj.originY || 'top',
+                                                opacity: obj.opacity,
+                                                angle: obj.angle,
+                                                dataTag: 'provider_source',
+                                                selectable: false
+                                            });
+                                            canvas.remove(obj);
+                                            canvas.add(img);
+                                            resolve();
+                                            return;
                                         }
 
                                         const textObj = new fabric.IText(providerText, {

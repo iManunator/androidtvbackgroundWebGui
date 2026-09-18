@@ -1150,7 +1150,7 @@ function ensureSeerrProviderBadge(data) {
         top = maxBottom + 24;
     }
 
-    const placeholder = new fabric.IText('Not in library', {
+    const placeholder = new fabric.IText(' ', {
         left,
         top,
         fontFamily: 'Roboto',
@@ -1409,13 +1409,8 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                             pText = "Now on my watchlist ";
                             pLogo = "traktlogo.png";
                         } else if (srcVal && (srcVal.startsWith('Seerr') || srcVal === 'Jellyseerr')) {
-                            if (avail === 'available' || avail === 'partial') {
-                                pText = "In library · ";
-                            } else if (avail === 'pending' || avail === 'processing' || (srcVal && srcVal.includes('Pending'))) {
-                                pText = "Requested · ";
-                            } else {
-                                pText = "Not in library · ";
-                            }
+                            // Logo-only Seerr mark (no status text)
+                            pText = "";
                             pLogo = "seerrlogo.png";
                         } else if (['Sonarr', 'Radarr', 'Jellyseerr'].includes(srcVal) || (srcVal && srcVal.includes('Missing'))) {
                             pText = (srcVal && srcVal.includes('Missing')) ? "Requested on " : "Soon available on ";
@@ -1459,6 +1454,26 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                                             if (t.strokeWidth !== undefined) currentProps.strokeWidth = t.strokeWidth;
                                             if (t.textAlign) currentProps.textAlign = t.textAlign;
                                         }
+                                    }
+
+                                    // Logo-only badge (e.g. Seerr)
+                                    if (!pText) {
+                                        const targetH = (currentProps.fontSize || 40) * 1.35;
+                                        img.scaleToHeight(targetH);
+                                        img.set({
+                                            left: obj.left,
+                                            top: obj.top,
+                                            originX: obj.originX || 'left',
+                                            originY: obj.originY || 'top',
+                                            opacity: obj.opacity,
+                                            angle: obj.angle,
+                                            dataTag: 'provider_source',
+                                            selectable: true
+                                        });
+                                        canvas.remove(obj);
+                                        canvas.add(img);
+                                        resolve();
+                                        return;
                                     }
 
                                     // Create Text Component
