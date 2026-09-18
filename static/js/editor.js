@@ -1157,7 +1157,7 @@ function setJellyfinLogoEnabled(on) {
 
 function shouldShowSeerrBadge(data) {
     if (!isSeerrMedia(data)) return false;
-    if (data.library_state === 'in_library') return false;
+    if (data.library_state === 'in_library' || data.jellyfin_id) return false;
     if (data.library_state === 'seerr_only' || data.library_state === 'upcoming') return true;
     const avail = data.availability;
     // Show on wallpaper when not already in the library
@@ -1165,8 +1165,35 @@ function shouldShowSeerrBadge(data) {
 }
 
 function shouldShowJellyfinBadge(data) {
-    if (data && data.library_state === 'in_library') return true;
+    if (!data) return false;
+    // Never show JF mark for Seerr-only / upcoming titles
+    if (isSeerrMedia(data) && data.library_state !== 'in_library' && !data.jellyfin_id) return false;
+    if (data.library_state === 'in_library' || data.jellyfin_id) return true;
     return isJellyfinMedia(data);
+}
+
+function resolveProviderLogoFile(mediaData) {
+    const srcVal = String((mediaData && mediaData.source) || '');
+    const libState = (mediaData && mediaData.library_state) || '';
+    const seerrItem = isSeerrMedia(mediaData) || srcVal.startsWith('Seerr') || srcVal === 'Jellyseerr';
+
+    // Seerr-only / upcoming → Seerr logo only (never Jellyfin)
+    if (seerrItem && libState !== 'in_library' && !mediaData.jellyfin_id) {
+        return 'seerrlogo.png';
+    }
+    if (libState === 'seerr_only' || libState === 'upcoming') {
+        return 'seerrlogo.png';
+    }
+    // In library / native Jellyfin
+    if (libState === 'in_library' || mediaData.jellyfin_id || srcVal === 'Jellyfin' || isJellyfinMedia(mediaData)) {
+        return 'jellyfinlogo.png';
+    }
+    if (seerrItem) return 'seerrlogo.png';
+    if (srcVal === 'TMDB') return 'tmdblogo.png';
+    if (srcVal === 'Trakt') return 'traktlogo.png';
+    if (srcVal === 'Plex') return 'plexlogo.png';
+    if (['Sonarr', 'Radarr'].includes(srcVal) || srcVal.includes('Missing')) return 'jellyfinlogo.png';
+    return seerrItem ? 'seerrlogo.png' : 'jellyfinlogo.png';
 }
 
 function placeProviderLogoPlaceholder() {
@@ -1579,15 +1606,76 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                     case 'availability_label':
                         val = mediaData.availability_label || mediaData.availability || '';
                         break;
-                    case 'watch_status':
-                        val = mediaData.watch_status || mediaData.status_label || null;
+                    case 'watch_status': {
+                        const wState = mediaData.watch_state || '';
+                        let wLabel = mediaData.watch_status || null;
+                        // Prefer watch label; for Seerr-only without watch, hide
+                        if (!wLabel && wState) {
+                            wLabel = wState === 'watched' ? 'Watched' : (wState === 'partially_watched' ? 'In progress' : 'Unwatched');
+                        }
+                        if (!wLabel) {
+                            obj.set('visible', false);
+                            val = undefined;
+                            break;
+                        }
+                        let wIcon = '/static/provider_logos/watch_unwatched.svg';
+                        if (wState === 'watched' || /^(watched)$/i.test(String(wLabel))) {
+                            wIcon = '/static/provider_logos/watch_watched.svg';
+                        } else if (wState === 'partially_watched' || /%|progress|partial/i.test(String(wLabel))) {
+                            wIcon = '/static/provider_logos/watch_partial.svg';
+                        }
+                        const wp = new Promise(resolve => {
+                            fabric.Image.fromURL(wIcon, function (img, isError) {
+                                if (isError || !img) {
+                                    obj.set({ text: wLabel, visible: true });
+                                    resolve();
+                                    return;
+                                }
+                                let fontSize = obj.fontSize || 28;
+                                let fill = 'white';
+                                let fontFamily = 'Roboto';
+                                if (obj.type === 'group' && obj.getObjects) {
+                                    const t = obj.getObjects().find(o => o.type === 'i-text' || o.type === 'text');
+                                    if (t) {
+                                        if (t.fontSize) fontSize = t.fontSize;
+                                        if (t.fill) fill = t.fill;
+                                        if (t.fontFamily) fontFamily = t.fontFamily;
+                                    }
+                                }
+                                const text = new fabric.IText(String(wLabel), {
+                                    fontFamily, fontSize, fill, editable: false,
+                                    shadow: '2px 2px 8px rgba(0,0,0,0.7)'
+                                });
+                                img.scaleToHeight(text.getScaledHeight() * 0.95);
+                                img.set({ left: 0, top: 0 });
+                                text.set({ left: img.getScaledWidth() + 10, top: 0 });
+                                const group = new fabric.Group([img, text], {
+                                    left: obj.left, top: obj.top,
+                                    originX: 'left', originY: 'top',
+                                    dataTag: 'watch_status'
+                                });
+                                canvas.remove(obj);
+                                canvas.add(group);
+                                resolve();
+                            }, { crossOrigin: 'anonymous' });
+                        });
+                        promises.push(wp);
+                        val = undefined;
                         break;
+                    }
                     case 'library_status':
                         val = mediaData.library_status || null;
                         break;
                     case 'primary_score': {
-                        const pScore = mediaData.primary_score_label || mediaData.primary_score;
-                        const pSrc = mediaData.primary_score_source || 'imdb';
+                        let pScore = mediaData.primary_score_label || mediaData.primary_score;
+                        let pSrc = mediaData.primary_score_source || '';
+                        // Jellyfin community rating fallback
+                        if (!pScore && mediaData.rating != null && mediaData.rating !== '' && mediaData.rating !== 'N/A') {
+                            const r = parseFloat(mediaData.rating);
+                            pScore = !isNaN(r) ? r.toFixed(1) : String(mediaData.rating);
+                            pSrc = 'community';
+                        }
+                        if (!pSrc) pSrc = (isJellyfinMedia(mediaData) || mediaData.library_state === 'in_library') ? 'community' : 'imdb';
                         obj.set({ originX: 'left', originY: 'top' });
                         if (!pScore) {
                             obj.set('visible', false);
@@ -1600,7 +1688,7 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                             tmdb: '/static/provider_logos/tmdblogo.png',
                             community: '/static/provider_logos/jellyfinlogo.png'
                         };
-                        const logoUrl = scoreLogos[pSrc] || scoreLogos.imdb;
+                        const logoUrl = scoreLogos[pSrc] || scoreLogos.community;
                         const label = String(pScore);
                         const p = new Promise(resolve => {
                             fabric.Image.fromURL(logoUrl, function (img, isError) {
@@ -1656,33 +1744,7 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                     case 'provider_source':
                         const srcVal = (mediaData.source || "Jellyfin");
                         let pText = "";
-                        let pLogo = null;
-                        const avail = mediaData.availability;
-                        const libState = mediaData.library_state || '';
-
-                        // Logo-only: prefer library_state, always no prose for JF/Seerr
-                        if (libState === 'in_library' || srcVal === 'Jellyfin' || isJellyfinMedia(mediaData)) {
-                            pText = "";
-                            pLogo = "jellyfinlogo.png";
-                        } else if (libState === 'upcoming' || libState === 'seerr_only' || (srcVal && (srcVal.startsWith('Seerr') || srcVal === 'Jellyseerr'))) {
-                            pText = "";
-                            pLogo = "seerrlogo.png";
-                        } else if (srcVal === 'TMDB') {
-                            pText = "";
-                            pLogo = "tmdblogo.png";
-                        } else if (srcVal === 'Trakt') {
-                            pText = "";
-                            pLogo = "traktlogo.png";
-                        } else if (srcVal === 'Plex') {
-                            pText = "";
-                            pLogo = "plexlogo.png";
-                        } else if (['Sonarr', 'Radarr'].includes(srcVal) || (srcVal && srcVal.includes('Missing'))) {
-                            pText = "";
-                            pLogo = "jellyfinlogo.png";
-                        } else {
-                            pText = "";
-                            pLogo = "jellyfinlogo.png";
-                        }
+                        let pLogo = resolveProviderLogoFile(mediaData);
 
                         if (pLogo) {
                             const p = new Promise(resolve => {

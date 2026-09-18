@@ -1,4 +1,4 @@
-CURRENT_VERSION = "1.5.0"
+CURRENT_VERSION = "1.5.1"
 import os
 import sys
 import json
@@ -977,11 +977,12 @@ def format_seerr_item(norm: dict, config: dict = None) -> dict:
         "firstAirDate": merged.get("firstAirDate") or norm.get("first_air_date") or norm.get("firstAirDate"),
     }
     media_status.apply_seerr_status(payload, norm)
-    # Cross-link Jellyfin watch status when possible (in library or same title in JF)
-    try:
-        media_status.enrich_with_jellyfin_watch(payload, config)
-    except Exception as e:
-        print(f"Seerr Jellyfin watch enrich error: {e}")
+    # Only cross-link Jellyfin when Seerr reports in-library (avoids false JF logo on Seerr-only)
+    if payload.get("in_library") or payload.get("library_state") == "in_library":
+        try:
+            media_status.enrich_with_jellyfin_watch(payload, config)
+        except Exception as e:
+            print(f"Seerr Jellyfin watch enrich error: {e}")
     return media_status.attach_primary_score(payload)
 
 

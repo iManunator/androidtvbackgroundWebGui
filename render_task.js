@@ -1622,15 +1622,78 @@ function getCertificationFilename(rating) {
                 case 'availability_label':
                     val = data.availability_label || data.availability || '';
                     break;
-                case 'watch_status':
-                    val = data.watch_status || data.status_label || null;
+                case 'watch_status': {
+                    const wState = data.watch_state || '';
+                    let wLabel = data.watch_status || null;
+                    if (!wLabel && wState) {
+                        wLabel = wState === 'watched' ? 'Watched' : (wState === 'partially_watched' ? 'In progress' : 'Unwatched');
+                    }
+                    if (!wLabel) {
+                        obj.set('visible', false);
+                        val = undefined;
+                        break;
+                    }
+                    let wFile = 'watch_unwatched.svg';
+                    if (wState === 'watched' || /^(watched)$/i.test(String(wLabel))) wFile = 'watch_watched.svg';
+                    else if (wState === 'partially_watched' || /%|progress|partial/i.test(String(wLabel))) wFile = 'watch_partial.svg';
+                    const wPath = path.join(__dirname, 'static', 'provider_logos', wFile);
+                    if (fs.existsSync(wPath)) {
+                        const imgData = fs.readFileSync(wPath);
+                        const src = `data:image/svg+xml;base64,${imgData.toString('base64')}`;
+                        const wp = new Promise(resolve => {
+                            fabric.Image.fromURL(src, (img) => {
+                                if (!img) {
+                                    obj.set({ text: wLabel, visible: true });
+                                    resolve();
+                                    return;
+                                }
+                                let fontSize = obj.fontSize || 28;
+                                let fill = obj.fill || 'white';
+                                let fontFamily = obj.fontFamily || 'Roboto';
+                                if (obj.type === 'group' && obj.getObjects) {
+                                    const t = obj.getObjects().find(o => o.type === 'i-text' || o.type === 'text');
+                                    if (t) {
+                                        if (t.fontSize) fontSize = t.fontSize;
+                                        if (t.fill) fill = t.fill;
+                                        if (t.fontFamily) fontFamily = t.fontFamily;
+                                    }
+                                }
+                                const text = new fabric.IText(String(wLabel), {
+                                    fontFamily, fontSize, fill, editable: false,
+                                    shadow: '2px 2px 8px rgba(0,0,0,0.7)'
+                                });
+                                img.scaleToHeight(text.getScaledHeight() * 0.95);
+                                img.set({ left: 0, top: 0 });
+                                text.set({ left: img.getScaledWidth() + 10, top: 0 });
+                                const group = new fabric.Group([img, text], {
+                                    left: obj.left, top: obj.top,
+                                    originX: 'left', originY: 'top',
+                                    dataTag: 'watch_status'
+                                });
+                                canvas.remove(obj);
+                                canvas.add(group);
+                                resolve();
+                            });
+                        });
+                        promises.push(wp);
+                        val = undefined;
+                    } else {
+                        val = wLabel;
+                    }
                     break;
+                }
                 case 'library_status':
                     val = data.library_status || null;
                     break;
                 case 'primary_score': {
-                    const pScore = data.primary_score_label || data.primary_score;
-                    const pSrc = data.primary_score_source || 'imdb';
+                    let pScore = data.primary_score_label || data.primary_score;
+                    let pSrc = data.primary_score_source || '';
+                    if (!pScore && data.rating != null && data.rating !== '' && data.rating !== 'N/A') {
+                        const r = parseFloat(data.rating);
+                        pScore = !isNaN(r) ? r.toFixed(1) : String(data.rating);
+                        pSrc = 'community';
+                    }
+                    if (!pSrc) pSrc = (data.source === 'Jellyfin' || data.library_state === 'in_library') ? 'community' : 'imdb';
                     obj.set({ originX: 'left', originY: 'top' });
                     if (!pScore) {
                         obj.set('visible', false);
@@ -1643,7 +1706,7 @@ function getCertificationFilename(rating) {
                         tmdb: path.join(__dirname, 'static', 'provider_logos', 'tmdblogo.png'),
                         community: path.join(__dirname, 'static', 'provider_logos', 'jellyfinlogo.png')
                     };
-                    const logoPath = scoreLogos[pSrc] || scoreLogos.imdb;
+                    const logoPath = scoreLogos[pSrc] || scoreLogos.community;
                     const label = String(pScore);
                     if (fs.existsSync(logoPath)) {
                         const imgData = fs.readFileSync(logoPath);
@@ -1782,14 +1845,20 @@ function getCertificationFilename(rating) {
                     let providerText = "";
                     let providerLogo = null;
                     let source = data.source || "Jellyfin";
-                    const avail = data.availability;
                     const libState = data.library_state || '';
+                    const seerrItem = !!(data.seerr_url || String(data.id || '').startsWith('jellyseerr-') || String(data.id || '').startsWith('seerr-') || String(source).startsWith('Seerr') || source === 'Jellyseerr');
 
-                    // Logo-only source mark (JF vs Seerr)
-                    if (libState === 'in_library' || source === 'Jellyfin') {
+                    // Seerr-only / upcoming → Seerr logo only (never Jellyfin)
+                    if (seerrItem && libState !== 'in_library' && !data.jellyfin_id) {
+                        providerText = "";
+                        providerLogo = "seerrlogo.png";
+                    } else if (libState === 'seerr_only' || libState === 'upcoming') {
+                        providerText = "";
+                        providerLogo = "seerrlogo.png";
+                    } else if (libState === 'in_library' || data.jellyfin_id || source === 'Jellyfin') {
                         providerText = "";
                         providerLogo = "jellyfinlogo.png";
-                    } else if (libState === 'upcoming' || libState === 'seerr_only' || (source && (String(source).startsWith('Seerr') || source === 'Jellyseerr'))) {
+                    } else if (seerrItem || String(source).startsWith('Seerr')) {
                         providerText = "";
                         providerLogo = "seerrlogo.png";
                     } else if (source === 'TMDB') {
@@ -1806,7 +1875,7 @@ function getCertificationFilename(rating) {
                         providerLogo = "jellyfinlogo.png";
                     } else {
                         providerText = "";
-                        providerLogo = "jellyfinlogo.png";
+                        providerLogo = seerrItem ? "seerrlogo.png" : "jellyfinlogo.png";
                     }
 
                     if (providerLogo) {
