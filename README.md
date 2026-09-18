@@ -34,7 +34,9 @@ It includes a full WYSIWYG editor, streaming-style layout presets (Netflix / Pri
 
 For **Projectivy Launcher**, use the dedicated plugin:
 
-**[Projectivy TVBG Suite Plugin](https://github.com/z9m/projectivy-tvbgsuite-plugin)**
+**[Projectivy TVBG Suite Plugin](https://github.com/iManunator/projectivy-tvbgsuite-plugin)** (fork) · upstream [z9m](https://github.com/z9m/projectivy-tvbgsuite-plugin)
+
+Wallpaper pick modes use `/api/wallpaper/status` with `sort`, `pool`, and `exclude` (v1.6.1+). After updating, rebuild the metadata cache so watch/library fields are available.
 
 ---
 

@@ -1,4 +1,4 @@
-CURRENT_VERSION = "1.6.1"
+CURRENT_VERSION = "1.6.2"
 import os
 import sys
 import json
@@ -2365,107 +2365,150 @@ def get_wallpaper_status():
     max_rating_filter = request.args.get('max_rating')
     min_year_filter = request.args.get('min_year')
     max_year_filter = request.args.get('max_year')
-    sort_mode = request.args.get('sort', 'random') # random, year, rating
+    sort_mode = (request.args.get('sort') or 'random').strip().lower()
+    pool = (request.args.get('pool') or '').strip().lower()
+    exclude_raw = request.args.get('exclude') or request.args.get('exclude_path') or ''
 
     safe_layout = "".join(c for c in layout_name if c.isalnum() or c in " ._-").strip()
     base_path = os.path.dirname(os.path.abspath(__file__))
-    target_dir = os.path.join(base_path, 'editor_backgrounds', safe_layout)
-    
+
     response = {
         "imageUrl": None,
         "actionUrl": None,
-        "title": None
+        "title": None,
+        "path": None,
+        "sort": sort_mode,
+        "pool": pool or None,
     }
 
     # 1. Collect Candidates from RAM Cache (No Disk I/O)
-    # Filter by layout first
     candidates = [img for img in METADATA_CACHE["images"] if img.get('layout') == safe_layout]
-    
     if not candidates:
         return jsonify(response)
 
-    # 2. Filter
-    filtered = candidates
-    
+    # Ensure mtime exists for older cache entries
+    for img in candidates:
+        if not img.get('mtime'):
+            img['mtime'] = _wallpaper_mtime(img.get('path'))
+        if not img.get('source_norm') and img.get('source'):
+            img['source_norm'] = _normalize_source(img.get('source'))
+
+    filtered = list(candidates)
+
+    # Pool filters (watch / library / source)
+    if pool:
+        before_pool = filtered
+        if pool == 'unwatched':
+            filtered = [c for c in filtered if str(c.get('watch_state') or '').lower() in ('unwatched', 'unplayed')]
+        elif pool in ('partial', 'partially_watched'):
+            filtered = [c for c in filtered if str(c.get('watch_state') or '').lower() in ('partial', 'partially_watched', 'inprogress', 'in_progress')]
+        elif pool == 'watched':
+            filtered = [c for c in filtered if str(c.get('watch_state') or '').lower() in ('watched', 'played')]
+        elif pool == 'in_library':
+            filtered = [c for c in filtered if str(c.get('library_state') or '').lower() == 'in_library' or c.get('jellyfin_id') or c.get('source_norm') == 'jellyfin']
+        elif pool in ('seerr_only', 'not_in_library'):
+            filtered = [c for c in filtered if str(c.get('library_state') or '').lower() in ('seerr_only', 'not_in_library') or (c.get('source_norm') == 'jellyseerr' and not c.get('jellyfin_id'))]
+        elif pool == 'requestable':
+            filtered = [c for c in filtered if str(c.get('availability') or '').lower() in ('not_available', 'requestable') or str(c.get('library_state') or '').lower() == 'seerr_only']
+        elif pool in ('available', 'available_seerr'):
+            filtered = [c for c in filtered if str(c.get('availability') or '').lower() in ('available', 'available_seerr')]
+        elif pool.startswith('source:'):
+            want = pool.split(':', 1)[1].strip().lower()
+            if want in ('seerr', 'jellyseerr'):
+                want = 'jellyseerr'
+            filtered = [c for c in filtered if c.get('source_norm') == want or want in str(c.get('source') or '').lower()]
+        if not filtered:
+            filtered = before_pool  # never blank out pool misses
+
     # Rating Filter
     if min_rating_filter or max_rating_filter:
         try:
             min_r = float(min_rating_filter) if min_rating_filter else 0.0
             max_r = float(max_rating_filter) if max_rating_filter else 10.0
-            filtered = [c for c in filtered if min_r <= float(c.get('rating', 0)) <= max_r]
-        except: pass
-    
+            filtered = [c for c in filtered if min_r <= float(c.get('rating', 0) or 0) <= max_r]
+        except Exception:
+            pass
+
     # Year Filter (Range)
     if min_year_filter or max_year_filter:
         try:
             min_y = int(min_year_filter) if min_year_filter else 0
             max_y = int(max_year_filter) if max_year_filter else 9999
             filtered = [c for c in filtered if min_y <= int(c.get('year', 0) or 0) <= max_y]
-        except: pass
+        except Exception:
+            pass
 
     if genre_filter:
-        # Split by comma for multi-select (OR logic)
         g_terms = [g.strip().lower() for g in genre_filter.split(',') if g.strip()]
         if g_terms:
             filtered = [c for c in filtered if any(term in str(c.get('genres', '')).lower() for term in g_terms)]
-        
+
     if age_rating_filter:
-        # Split by comma for multi-select (OR logic)
         a_terms = [a.strip().lower() for a in age_rating_filter.split(',') if a.strip()]
         if a_terms:
-            # Normalize terms (remove non-alnum)
             norm_terms = ["".join(c for c in t if c.isalnum()) for t in a_terms]
             filtered = [c for c in filtered if any(term in "".join(k for k in str(c.get('officialRating', '')).lower() if k.isalnum()) for term in norm_terms)]
 
+    # Exclude recently shown paths / filenames
+    exclude_tokens = [t.strip().replace('\\', '/').lower() for t in exclude_raw.split(',') if t.strip()]
+    if exclude_tokens and len(filtered) > 1:
+        def _is_excluded(entry):
+            path = str(entry.get('path') or '').replace('\\', '/').lower()
+            base = os.path.basename(path).lower()
+            stem = os.path.splitext(base)[0]
+            for token in exclude_tokens:
+                if token == path or token == base or token in path or os.path.splitext(os.path.basename(token))[0] == stem:
+                    return True
+            return False
+        narrowed = [c for c in filtered if not _is_excluded(c)]
+        if narrowed:
+            filtered = narrowed
+
     # Fallback if filter too strict
-    # If rating filter was applied and result is empty, we might want to return nothing (404 logic)
-    # or fallback to candidates. The user requested: "return fallback image (without filter)"
     if not filtered and candidates:
-        # If specific filters failed, fallback to any image from this layout
         filtered = candidates
     elif not filtered:
         return jsonify(response)
 
     # 3. Sort / Pick
     selected = None
-    if sort_mode == 'year':
+    if sort_mode in ('year', 'year_desc'):
         filtered.sort(key=lambda x: int(x.get('year', 0) or 0), reverse=True)
         selected = filtered[0]
-    elif sort_mode == 'rating':
-        filtered.sort(key=lambda x: float(x.get('rating', 0)), reverse=True)
+    elif sort_mode in ('year_asc', 'year_old'):
+        filtered.sort(key=lambda x: int(x.get('year', 0) or 0))
         selected = filtered[0]
-    elif sort_mode == 'latest':
-        # We don't have mtime in cache yet, fallback to random or add mtime to cache if needed
-        # For now, random is better than crashing
+    elif sort_mode in ('rating', 'rating_high', 'rating_desc'):
+        filtered.sort(key=lambda x: float(x.get('rating', 0) or 0), reverse=True)
         selected = filtered[0]
-    else: # random
+    elif sort_mode in ('rating_asc', 'rating_low'):
+        filtered.sort(key=lambda x: float(x.get('rating', 0) or 0))
+        selected = filtered[0]
+    elif sort_mode in ('latest', 'newest', 'mtime_desc'):
+        filtered.sort(key=lambda x: float(x.get('mtime', 0) or 0), reverse=True)
+        selected = filtered[0]
+    elif sort_mode in ('oldest', 'mtime_asc'):
+        filtered.sort(key=lambda x: float(x.get('mtime', 0) or 0))
+        selected = filtered[0]
+    else:  # random
         selected = random.choice(filtered)
 
     # 4. Construct Response
     if selected:
-        # We need to reconstruct the relative filename for the URL
-        # The cache stores absolute path. We need relative to editor_backgrounds/LayoutName
-        # But get_gallery_image expects filename relative to the folder param.
-        
         full_path = selected['path']
         filename = os.path.basename(full_path).replace('.json', '.jpg')
-        
-        # Check if it's in a subfolder (Genre sorting)
-        # We can try to deduce it from the path
+
         layout_dir = os.path.join(base_path, 'editor_backgrounds', safe_layout)
         if full_path.startswith(layout_dir):
             rel_path = os.path.relpath(full_path, layout_dir)
-            # rel_path might be "Action/Movie.json"
-            filename = rel_path.replace('.json', '.jpg')
-            # Ensure slashes are correct for URL
-            filename = filename.replace('\\', '/')
+            filename = rel_path.replace('.json', '.jpg').replace('\\', '/')
 
-        # Use layout subfolder logic for URL
         folder_param = f"Layout: {safe_layout}"
         response["imageUrl"] = url_for('gui_editor.get_gallery_image', folder=folder_param, filename=filename, _external=True)
         response["actionUrl"] = selected.get("action_url")
         response["title"] = selected.get("title")
-            
+        response["path"] = filename
+
     return jsonify(response)
 
 @gui_editor_bp.route('/api/current-background')
