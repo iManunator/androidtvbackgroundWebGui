@@ -1000,9 +1000,20 @@ async function fetchMediaData(itemId = null) {
     }
 
     try {
-        const url = itemId ? `/api/media/item/${itemId}` : '/api/media/random';
+        let url;
+        if (itemId) {
+            url = `/api/media/item/${itemId}`;
+        } else {
+            const providerEl = document.getElementById('shuffleProvider');
+            const provider = (providerEl && providerEl.value) ? providerEl.value : 'jellyfin';
+            try { localStorage.setItem('tvb_shuffle_provider', provider); } catch (e) {}
+            url = `/api/media/random?provider=${encodeURIComponent(provider)}`;
+        }
         const response = await fetch(url);
         const data = await response.json();
+        if (data && data.error) {
+            throw new Error(data.error);
+        }
 
         // --- OMDb Integration ---
         if (data.imdb_id) {
@@ -3142,6 +3153,17 @@ function init() {
     loadCronJobs(); // Load jobs on init
     injectCronFilterUI(); // Inject filter UI for Cron Jobs
     updateCronFrequencyOptions(); // Inject extra frequency options
+
+    // Restore shuffle provider preference
+    const shuffleSel = document.getElementById('shuffleProvider');
+    if (shuffleSel) {
+        try {
+            const saved = localStorage.getItem('tvb_shuffle_provider');
+            if (saved && Array.from(shuffleSel.options).some(o => o.value === saved)) {
+                shuffleSel.value = saved;
+            }
+        } catch (e) {}
+    }
 
     // Set initial mobile title
     const activeLink = document.querySelector('.tab-link.active');

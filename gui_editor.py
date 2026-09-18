@@ -1,4 +1,4 @@
-CURRENT_VERSION = "1.2.0"
+CURRENT_VERSION = "1.2.1"
 import os
 import sys
 import json
@@ -835,9 +835,13 @@ def fetch_tmdb_list(config, limit_count):
 def get_random_media():
     config = load_config()
     provider = (request.args.get('provider') or request.args.get('providers') or 'jellyfin').split(',')[0].strip().lower()
+    if provider == 'seerr':
+        provider = 'jellyseerr'
 
     # Prefer Seerr when explicitly requested
-    if provider in ('jellyseerr', 'seerr') and seerr_client.is_configured(config):
+    if provider == 'jellyseerr':
+        if not seerr_client.is_configured(config):
+            return jsonify({"error": "Seerr is not configured (URL + API key)"}), 400
         conf = seerr_client.get_seerr_conf(config)
         try:
             items = seerr_client.fetch_trending_items(
@@ -851,14 +855,24 @@ def get_random_media():
             )
             if items:
                 return jsonify(format_seerr_item(random.choice(items), config))
+            return jsonify({"error": "No Seerr trending items found"}), 404
         except Exception as e:
             print(f"DEBUG: Seerr random error: {e}")
+            return jsonify({"error": f"Seerr error: {e}"}), 500
+
+    if provider == 'tmdb':
+        tmdb_items = fetch_tmdb_list(config, 40)
+        if tmdb_items:
+            pick = random.choice(tmdb_items)
+            # Id like tmdb-movie-123
+            return get_media_item(pick['Id'])
+        return jsonify({"error": "No TMDB items (check API key)"}), 404
 
     jf = config.get('jellyfin', {})
     excluded_libs = jf.get('excluded_libraries', "")
     excluded_list = [x.strip() for x in excluded_libs.split(',') if x.strip()]
     
-    if jf.get('url') and jf.get('api_key'):
+    if provider in ('jellyfin', 'plex') and jf.get('url') and jf.get('api_key') and provider == 'jellyfin':
         headers = jellyfin_headers(jf['api_key'])
         clean_url = jf['url'].rstrip('/')
         user_id = resolve_jellyfin_user_id(clean_url, jf['api_key'], jf.get('user_id'))
@@ -901,9 +915,22 @@ def get_random_media():
                 return jsonify(format_jellyfin_item(item, clean_url, jf['api_key'], user_id))
         except Exception as e:
             print(f"DEBUG: Jellyfin Error: {e}")
+            if provider == 'jellyfin':
+                return jsonify({"error": f"Jellyfin error: {e}"}), 500
 
-    # Fallback: Seerr trending if configured
-    if seerr_client.is_configured(config):
+    if provider == 'plex':
+        p = config.get('plex', {})
+        if p.get('url') and p.get('token'):
+            try:
+                items = fetch_plex_list(config, 'all', '', 'Movie,Series', 50)
+                if items:
+                    return get_media_item(random.choice(items)['Id'])
+            except Exception as e:
+                return jsonify({"error": f"Plex error: {e}"}), 500
+        return jsonify({"error": "Plex is not configured"}), 400
+
+    # Fallback: Seerr trending if configured (only when provider wasn't an explicit failed path)
+    if provider == 'jellyfin' and seerr_client.is_configured(config):
         conf = seerr_client.get_seerr_conf(config)
         try:
             items = seerr_client.fetch_trending_items(
