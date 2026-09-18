@@ -498,6 +498,45 @@
             gap: 5px;
         }
 
+        .btn-seerr-request {
+            display: none;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 14px 7px 10px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 999px;
+            background: linear-gradient(180deg, #3d2a55 0%, #2a1b3d 100%);
+            color: #f3eef8;
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            cursor: pointer;
+            box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 2px 8px rgba(0, 0, 0, 0.35);
+            transition: transform 0.12s ease, filter 0.12s ease, border-color 0.12s ease;
+        }
+
+        .btn-seerr-request:hover {
+            filter: brightness(1.12);
+            border-color: rgba(187, 134, 252, 0.45);
+            transform: translateY(-1px);
+        }
+
+        .btn-seerr-request:active {
+            transform: translateY(0);
+            filter: brightness(0.96);
+        }
+
+        .btn-seerr-request img {
+            width: 18px;
+            height: 18px;
+            object-fit: contain;
+            border-radius: 4px;
+        }
+
+        .btn-seerr-request span {
+            line-height: 1;
+        }
+
         #toolsToggle {
             display: none;
         }
@@ -1071,9 +1110,6 @@
                         <button onclick="addMetadataTag('overview', 'Movie description...')">Overview</button>
                         <button onclick="addMetadataTag('provider_source', 'Now available on...')">Provider
                             Info</button>
-                        <button onclick="addSeerrAvailabilityBadge()" style="background:#00897b; color:#fff;">Available on Seerr</button>
-                        <button onclick="addMetadataTag('availability', 'Not in library')">Seerr Availability</button>
-                        <button onclick="addMetadataTag('availability_label', 'Requestable')">Seerr Status Label</button>
                         <button onclick="addMetadataTag('certification', 'FSK 16')">Age Rating (Image)</button>
                         <button onclick="addMetadataTag('actors', 'Actor 1, Actor 2...')">Actors</button>
                         <button onclick="addMetadataTag('directors', 'Director Name')">Directors</button>
@@ -1238,13 +1274,11 @@
                             <button id="btn-shuffle" onclick="fetchRandomPreview()"
                                 style="background: #1565c0; padding: 8px 15px; border: none; border-radius: 4px; color: white; cursor: pointer; box-shadow: 0 2px 5px rgba(0,0,0,0.5);"
                                 data-i18n="shuffle_preview">🎲 <span>Shuffle Preview</span></button>
-                            <button id="btn-request-seerr" onclick="requestCurrentViaSeerr()"
-                                style="display:none; background: #6a1b9a; padding: 8px 12px; border: none; border-radius: 4px; color: white; cursor: pointer;">Request via Seerr</button>
-                            <button id="btn-add-seerr-badge" onclick="addSeerrAvailabilityBadge()"
-                                style="display:none; background: #00897b; padding: 8px 12px; border: none; border-radius: 4px; color: white; cursor: pointer;"
-                                title="Place Seerr availability text + logo on the wallpaper">Available on Seerr</button>
-                            <span id="availability-chip"
-                                style="display:none; font-size: 11px; padding: 4px 8px; border-radius: 10px; background:#333; color:#eee;"></span>
+                            <button id="btn-request-seerr" class="btn-seerr-request" onclick="requestCurrentViaSeerr()"
+                                title="Request this title in Seerr">
+                                <img src="/static/provider_logos/seerrlogo.png" alt="" aria-hidden="true">
+                                <span>Request Seerr</span>
+                            </button>
                             <span id="source-indicator"
                                 style="font-size: 11px; color: #aaa; text-shadow: 1px 1px 2px black;">Source:
                                 None</span>

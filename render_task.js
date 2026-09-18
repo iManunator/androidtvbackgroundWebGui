@@ -1614,11 +1614,11 @@ function getCertificationFilename(rating) {
                         providerLogo = "traktlogo.png";
                     } else if (source && (String(source).startsWith('Seerr') || source === 'Jellyseerr')) {
                         if (avail === 'available' || avail === 'partial') {
-                            providerText = "Now available on ";
+                            providerText = "Available on ";
                         } else if (avail === 'pending' || avail === 'processing' || String(source).includes('Pending')) {
                             providerText = "Requested on ";
                         } else {
-                            providerText = "Not in library — request on ";
+                            providerText = "Request ";
                         }
                         providerLogo = "seerrlogo.png";
                     } else if (['Sonarr', 'Radarr', 'Jellyseerr'].includes(source) || (source && source.includes('Missing'))) {

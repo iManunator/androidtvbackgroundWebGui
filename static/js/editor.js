@@ -1119,36 +1119,11 @@ function isSeerrMedia(data) {
 
 function updateSeerrUi(data) {
     const btn = document.getElementById('btn-request-seerr');
-    const badgeBtn = document.getElementById('btn-add-seerr-badge');
-    const chip = document.getElementById('availability-chip');
-    if (!btn || !chip) return;
-    const seerrItem = isSeerrMedia(data);
-    const label = data && (data.availability_label || data.availability);
-    if (seerrItem && label) {
-        chip.style.display = 'inline-block';
-        chip.innerText = label;
-        const avail = data.availability;
-        if (avail === 'available' || avail === 'partial') chip.style.background = '#2e7d32';
-        else if (avail === 'pending' || avail === 'processing') chip.style.background = '#ef6c00';
-        else chip.style.background = '#6a1b9a';
-    } else {
-        chip.style.display = 'none';
-    }
+    if (!btn) return;
     if (data && data.can_request && data.tmdb_id) {
-        btn.style.display = 'inline-block';
+        btn.style.display = 'inline-flex';
     } else {
         btn.style.display = 'none';
-    }
-    if (badgeBtn) {
-        if (seerrItem) {
-            badgeBtn.style.display = 'inline-block';
-            const avail = data.availability;
-            if (avail === 'available' || avail === 'partial') badgeBtn.innerText = 'Available on Seerr';
-            else if (avail === 'pending' || avail === 'processing') badgeBtn.innerText = 'Requested on Seerr';
-            else badgeBtn.innerText = 'Request on Seerr';
-        } else {
-            badgeBtn.style.display = 'none';
-        }
     }
 }
 
@@ -1160,9 +1135,8 @@ function addSeerrAvailabilityBadge() {
     }
     const existing = canvas.getObjects().find(o => o.dataTag === 'provider_source');
     if (!existing) {
-        addMetadataTag('provider_source', 'Now available on...');
+        addMetadataTag('provider_source', 'Request ');
     }
-    // Fill badge with current Seerr availability text + logo
     previewTemplate(lastFetchedData);
 }
 
@@ -1438,11 +1412,11 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                             pLogo = "traktlogo.png";
                         } else if (srcVal && (srcVal.startsWith('Seerr') || srcVal === 'Jellyseerr')) {
                             if (avail === 'available' || avail === 'partial') {
-                                pText = "Now available on ";
+                                pText = "Available on ";
                             } else if (avail === 'pending' || avail === 'processing' || (srcVal && srcVal.includes('Pending'))) {
                                 pText = "Requested on ";
                             } else {
-                                pText = "Not in library — request on ";
+                                pText = "Request ";
                             }
                             pLogo = "seerrlogo.png";
                         } else if (['Sonarr', 'Radarr', 'Jellyseerr'].includes(srcVal) || (srcVal && srcVal.includes('Missing'))) {
