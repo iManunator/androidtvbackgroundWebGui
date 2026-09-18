@@ -1157,12 +1157,15 @@ function setJellyfinLogoEnabled(on) {
 
 function shouldShowSeerrBadge(data) {
     if (!isSeerrMedia(data)) return false;
+    if (data.library_state === 'in_library') return false;
+    if (data.library_state === 'seerr_only' || data.library_state === 'upcoming') return true;
     const avail = data.availability;
     // Show on wallpaper when not already in the library
     return avail !== 'available' && avail !== 'partial';
 }
 
 function shouldShowJellyfinBadge(data) {
+    if (data && data.library_state === 'in_library') return true;
     return isJellyfinMedia(data);
 }
 
@@ -1253,7 +1256,7 @@ function updateJellyfinLogoToggleUi() {
     const btn = document.getElementById('btn-toggle-jellyfin-logo');
     if (!btn) return;
     const shuffleSel = document.getElementById('shuffleProvider');
-    const show = isJellyfinMedia(lastFetchedData) || (shuffleSel && shuffleSel.value === 'jellyfin');
+    const show = isJellyfinMedia(lastFetchedData) || (lastFetchedData && lastFetchedData.library_state === 'in_library') || (shuffleSel && shuffleSel.value === 'jellyfin');
     btn.style.display = show ? 'inline-flex' : 'none';
     const on = isJellyfinLogoEnabled();
     btn.classList.toggle('active', on);
@@ -1571,6 +1574,12 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                     case 'availability_label':
                         val = mediaData.availability_label || mediaData.availability || '';
                         break;
+                    case 'watch_status':
+                        val = mediaData.watch_status || mediaData.status_label || null;
+                        break;
+                    case 'library_status':
+                        val = mediaData.library_status || null;
+                        break;
                     case 'runtime':
                         val = mediaData.runtime;
                         const rtCheck = String(val || "").toLowerCase().replace(/\s/g, '');
@@ -1584,24 +1593,23 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                         let pText = "";
                         let pLogo = null;
                         const avail = mediaData.availability;
+                        const libState = mediaData.library_state || '';
 
-                        if (srcVal === 'TMDB') {
+                        if (libState === 'in_library' || srcVal === 'Jellyfin' || isJellyfinMedia(mediaData)) {
+                            pText = "";
+                            pLogo = "jellyfinlogo.png";
+                        } else if (libState === 'upcoming' || libState === 'seerr_only' || (srcVal && (srcVal.startsWith('Seerr') || srcVal === 'Jellyseerr'))) {
+                            pText = "";
+                            pLogo = "seerrlogo.png";
+                        } else if (srcVal === 'TMDB') {
                             pText = "Now Trending on ";
                             pLogo = "tmdblogo.png";
                         } else if (srcVal === 'Trakt') {
                             pText = "Now on my watchlist ";
                             pLogo = "traktlogo.png";
-                        } else if (srcVal && (srcVal.startsWith('Seerr') || srcVal === 'Jellyseerr')) {
-                            // Logo-only Seerr mark (no status text)
-                            pText = "";
-                            pLogo = "seerrlogo.png";
                         } else if (srcVal === 'Plex') {
                             pText = "Now available on ";
                             pLogo = "plexlogo.png";
-                        } else if (srcVal === 'Jellyfin' || isJellyfinMedia(mediaData)) {
-                            // Logo-only Jellyfin mark (in library)
-                            pText = "";
-                            pLogo = "jellyfinlogo.png";
                         } else if (['Sonarr', 'Radarr', 'Jellyseerr'].includes(srcVal) || (srcVal && srcVal.includes('Missing'))) {
                             pText = (srcVal && srcVal.includes('Missing')) ? "Requested on " : "Soon available on ";
                             pLogo = "jellyfinlogo.png";
@@ -2316,6 +2324,90 @@ function addMetadataTag(type, placeholder) {
         textObj = new fabric.IText(placeholder, { ...props, editable: false });
     }
     finalize(textObj);
+}
+
+const VIEW_STYLE_PRESETS = {
+    jellyfin_dense: {
+        keep: new Set(['background', 'fade_effect', 'ambilight_bg', 'guide_overlay']),
+        tags: [
+            ['title', 'TITLE / LOGO'],
+            ['overview', 'Movie description...'],
+            ['genres', 'Action, Sci-Fi'],
+            ['rating', 'IMDb: 8.5'],
+            ['runtime', '2h 15m'],
+            ['actors', 'Actor 1, Actor 2...'],
+            ['provider_source', 'Now available on...'],
+            ['watch_status', 'Watched'],
+            ['library_status', 'In library']
+        ]
+    },
+    seerr_rich: {
+        keep: new Set(['background', 'fade_effect', 'ambilight_bg', 'guide_overlay']),
+        tags: [
+            ['title', 'TITLE / LOGO'],
+            ['tagline', 'A brand new day...'],
+            ['genres', 'Action, Adventure'],
+            ['status', 'Released'],
+            ['release_theatrical', '2026-07-12'],
+            ['provider_source', 'Now available on...'],
+            ['library_status', 'On Seerr'],
+            ['watch_status', 'Unwatched']
+        ],
+        ratingBadges: ['seerr_imdb', 'seerr_rt', 'seerr_tmdb']
+    },
+    status_focus: {
+        keep: new Set(['background', 'fade_effect', 'ambilight_bg', 'guide_overlay']),
+        tags: [
+            ['title', 'TITLE / LOGO'],
+            ['library_status', 'In library'],
+            ['watch_status', 'Watched'],
+            ['provider_source', 'Now available on...']
+        ]
+    }
+};
+
+function applyViewStyle(styleKey) {
+    const preset = VIEW_STYLE_PRESETS[styleKey];
+    if (!preset || !canvas) return;
+
+    const wanted = new Set(preset.tags.map(t => t[0]).concat(preset.ratingBadges || []));
+    const protectedTags = preset.keep || new Set();
+
+    // Hide metadata tags not in this style (keep structural layers)
+    canvas.getObjects().forEach(obj => {
+        const tag = obj.dataTag;
+        if (!tag || protectedTags.has(tag)) return;
+        if (wanted.has(tag)) {
+            obj.set('visible', true);
+        } else {
+            obj.set('visible', false);
+        }
+    });
+
+    // Add missing tags
+    preset.tags.forEach(([type, placeholder]) => {
+        const existing = canvas.getObjects().find(o => o.dataTag === type);
+        if (!existing) {
+            addMetadataTag(type, placeholder);
+        } else {
+            existing.set('visible', true);
+        }
+    });
+
+    (preset.ratingBadges || []).forEach(kind => {
+        const existing = canvas.getObjects().find(o => o.dataTag === kind);
+        if (!existing && typeof addSeerrRatingBadge === 'function') {
+            addSeerrRatingBadge(kind);
+        } else if (existing) {
+            existing.set('visible', true);
+        }
+    });
+
+    canvas.requestRenderAll();
+    if (typeof lastFetchedData !== 'undefined' && lastFetchedData) {
+        previewTemplate(lastFetchedData);
+    }
+    if (typeof saveToLocalStorage === 'function') saveToLocalStorage();
 }
 
 function addLogo(url) {
@@ -5910,6 +6002,7 @@ async function addCronJob() {
     const overwrite = document.getElementById('cronJobOverwrite').checked;
     const cleanup = document.getElementById('cronJobCleanup') ? document.getElementById('cronJobCleanup').checked : false;
     const runNow = document.getElementById('cronJobRunNow').checked;
+    const refreshWatch = document.getElementById('cronRefreshWatch') ? document.getElementById('cronRefreshWatch').checked : false;
 
     const layout = document.getElementById('cronJobLayout').value;
     const mode = document.getElementById('cronSourceMode') ? document.getElementById('cronSourceMode').value : 'library';
@@ -5934,9 +6027,10 @@ async function addCronJob() {
         enabled: true,
         start_time: start,
         frequency: freq,
-        overwrite: overwrite,
+        overwrite: overwrite || refreshWatch,
         cleanup: cleanup,
         force_run: runNow,
+        refresh_watch_status: refreshWatch,
         layout_name: layout,
         source_mode: mode,
         filter_mode: filterMode,
@@ -6100,6 +6194,9 @@ function injectCronFilterUI() {
                 <option value="year">By Year</option>
                 <option value="genre">By Genre</option>
                 <option value="rating">By Rating</option>
+                <option value="unwatched">Jellyfin: Unwatched</option>
+                <option value="in_progress">Jellyfin: In Progress</option>
+                <option value="watched">Jellyfin: Watched</option>
                 <option value="missing">Missing / Wanted (Radarr/Sonarr)</option>
                 <option value="available">Seerr: Available</option>
                 <option value="not_available">Seerr: Not in library</option>
@@ -6174,6 +6271,7 @@ function injectCronFilterUI() {
 
     checkboxesDiv.appendChild(createCb('cronLogoAutoFix', 'Auto Fix Logo Color', false));
     checkboxesDiv.appendChild(createCb('cronDryRun', 'Dry Run (Log only)', false));
+    checkboxesDiv.appendChild(createCb('cronRefreshWatch', 'Refresh watch status (force overwrite)', false));
 
     if (targetSibling) {
         targetParent.insertBefore(checkboxesDiv, targetSibling);

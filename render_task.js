@@ -1622,6 +1622,12 @@ function getCertificationFilename(rating) {
                 case 'availability_label':
                     val = data.availability_label || data.availability || '';
                     break;
+                case 'watch_status':
+                    val = data.watch_status || data.status_label || null;
+                    break;
+                case 'library_status':
+                    val = data.library_status || null;
+                    break;
                 case 'runtime':
                     val = data.runtime;
                     const rtCheck = String(val || "").toLowerCase().replace(/\s/g, '');
@@ -1714,23 +1720,24 @@ function getCertificationFilename(rating) {
                     let providerLogo = null;
                     let source = data.source || "Jellyfin";
                     const avail = data.availability;
+                    const libState = data.library_state || '';
 
-                    // Logic based on provider
-                    if (source === 'TMDB') {
+                    // Logic based on library state / provider
+                    if (libState === 'in_library' || source === 'Jellyfin') {
+                        providerText = "";
+                        providerLogo = "jellyfinlogo.png";
+                    } else if (libState === 'upcoming' || libState === 'seerr_only' || (source && (String(source).startsWith('Seerr') || source === 'Jellyseerr'))) {
+                        providerText = "";
+                        providerLogo = "seerrlogo.png";
+                    } else if (source === 'TMDB') {
                         providerText = "Now Trending on ";
                         providerLogo = "tmdblogo.png";
                     } else if (source === 'Trakt') {
                         providerText = "Now on my watchlist ";
                         providerLogo = "traktlogo.png";
-                    } else if (source && (String(source).startsWith('Seerr') || source === 'Jellyseerr')) {
-                        providerText = "";
-                        providerLogo = "seerrlogo.png";
                     } else if (source === 'Plex') {
                         providerText = "Now available on ";
                         providerLogo = "plexlogo.png";
-                    } else if (source === 'Jellyfin') {
-                        providerText = "";
-                        providerLogo = "jellyfinlogo.png";
                     } else if (['Sonarr', 'Radarr', 'Jellyseerr'].includes(source) || (source && source.includes('Missing'))) {
                         providerText = (source && source.includes('Missing')) ? "Requested on " : "Soon available on ";
                         providerLogo = "jellyfinlogo.png";

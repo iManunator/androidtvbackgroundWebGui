@@ -16,7 +16,8 @@ from datetime import datetime, timedelta
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from jellyfin_auth import jellyfin_headers, jellyfin_image_url, jellyfin_items_base, resolve_jellyfin_user_id
 import seerr_client
-from gui_editor import load_config, save_config, fetch_tmdb_details, format_seerr_item
+import media_status
+from gui_editor import load_config, save_config, fetch_tmdb_details, format_seerr_item, format_jellyfin_item
 
 # Import the missing search trigger script
 try:
@@ -226,11 +227,16 @@ def fetch_jellyfin_cron(config, job):
             for b in r_bs.json().get('Items', []): boxset_ids.add(b['Id'])
     except: pass
 
+    fmode = job.get('filter_mode', 'all')
     params = [
         f"IncludeItemTypes={job.get('item_types', 'Movie,Series')}",
         "Recursive=true", "ExcludeItemTypes=BoxSet",
-        "Fields=Overview,Genres,OfficialRating,CommunityRating,ProviderIds,ProductionYear,RunTimeTicks,OriginalTitle,Tags,Studios,InheritedParentalRatingValue,ImageTags,ParentId,People"
+        "Fields=Overview,Genres,OfficialRating,CommunityRating,ProviderIds,ProductionYear,RunTimeTicks,OriginalTitle,Tags,Studios,InheritedParentalRatingValue,ImageTags,ParentId,People,UserData,Type"
     ]
+
+    jf_watch_filter = media_status.jellyfin_filter_param(fmode)
+    if jf_watch_filter:
+        params.append(f"Filters={jf_watch_filter}")
     
     if job.get('source_mode') == 'random':
         params.append("SortBy=Random")
@@ -239,7 +245,6 @@ def fetch_jellyfin_cron(config, job):
         limit = job.get('limit', '0')
         if limit != '0': params.append(f"Limit={limit}")
         
-        fmode = job.get('filter_mode', 'all')
         fval = job.get('filter_value', '')
         if fmode == 'recent':
             params.append("SortBy=DateCreated")
@@ -252,6 +257,10 @@ def fetch_jellyfin_cron(config, job):
             params.append(f"MinCommunityRating={fval}")
             params.append("SortBy=CommunityRating")
             params.append("SortOrder=Descending")
+        elif jf_watch_filter:
+            params.append("SortBy=DatePlayed" if fmode == 'watched' else "SortBy=SortName")
+            if fmode == 'watched':
+                params.append("SortOrder=Descending")
         else:
             params.append("SortBy=SortName")
 
@@ -261,31 +270,22 @@ def fetch_jellyfin_cron(config, job):
         items = r.json().get('Items', [])
         meta_items = []
         for it in items:
-            ticks = it.get('RunTimeTicks', 0)
-            minutes = (ticks // 600000000) if ticks else 0
-            h, m = divmod(minutes, 60)
-            runtime = f"{h}h {m}min" if h > 0 else f"{m}min"
-            
-            is_in_boxset = it.get('ParentId') in boxset_ids
-            meta_items.append({
-                "id": it.get('Id'),
-                "title": it.get('Name'),
-                "year": it.get('ProductionYear'),
-                "overview": it.get('Overview'),
-                "rating": it.get('CommunityRating'),
-                "officialRating": it.get('OfficialRating'),
-                "genres": ", ".join(it.get('Genres', [])),
-                "runtime": runtime,
-                "backdrop_url": jellyfin_image_url(base_url, it['Id'], 'Backdrop', jf['api_key']),
-                "logo_url": None if is_in_boxset else (jellyfin_image_url(base_url, it['Id'], 'Logo', jf['api_key']) if 'Logo' in it.get('ImageTags', {}) else None),
-                "action_url": f"jellyfin://items/{it['Id']}",
-                "provider_ids": it.get('ProviderIds', {}),
-                "actors": [p.get('Name') for p in it.get('People', []) if p.get('Type') == 'Actor'],
-                "directors": list(dict.fromkeys(p.get('Name') for p in it.get('People', []) if p.get('Type') == 'Director')) or list(dict.fromkeys(p.get('Name') for p in it.get('People', []) if p.get('Type') == 'Writer')),
-                "source": "Jellyfin"
-            })
+            if it.get('ParentId') in boxset_ids and 'Logo' in it.get('ImageTags', {}):
+                # keep logo suppression for boxset children via format path
+                pass
+            formatted = format_jellyfin_item(it, base_url, jf['api_key'], user_id)
+            if it.get('ParentId') in boxset_ids:
+                formatted['logo_url'] = None
+            formatted['action_url'] = f"jellyfin://items/{it.get('Id')}"
+
+            # Client-side fallback if server Filters unsupported
+            if jf_watch_filter and not media_status.matches_watch_filter(formatted.get('watch_state'), fmode):
+                continue
+            meta_items.append(formatted)
         return meta_items
-    except: return []
+    except Exception as e:
+        log(f"Jellyfin cron fetch error: {e}")
+        return []
 
 def fetch_plex_cron(config, job):
     p = config.get('plex', {})
@@ -690,12 +690,14 @@ def fetch_items_and_process(job=None):
         output_base_name = f"{safe_title} - {meta.get('year')}"
         filename_for_api = f"{output_base_name}.jpg"
 
-        if not job.get('overwrite', False):
+        # Refresh watch status forces overwrite so badges update on schedule
+        do_overwrite = bool(job.get('overwrite', False) or job.get('refresh_watch_status', False))
+        if not do_overwrite:
             target_dir = os.path.join(os.path.dirname(__file__), 'editor_backgrounds', layout_name)
             if os.path.exists(os.path.join(target_dir, filename_for_api)):
                 log(f"Skipping {safe_title} (Exists)"); continue
         
-        log(f"Rendering: {meta['title']} ({meta.get('source', 'Unknown')})")
+        log(f"Rendering: {meta['title']} ({meta.get('source', 'Unknown')}) [{meta.get('watch_state') or meta.get('library_state') or '-'}]")
         
         # Enrich with OMDb data before rendering
         meta = enrich_with_omdb(meta, config)

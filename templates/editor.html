@@ -1141,6 +1141,23 @@
                 </div>
             </div>
 
+            <div class="control-group" id="group-status">
+                <h3 onclick="toggleGroup('group-status')"><span class="group-arrow collapsed">▼</span> Status &amp; View Styles</h3>
+                <div class="group-content collapsed">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-bottom: 8px;">
+                        <button onclick="addMetadataTag('watch_status', 'Watched')">Watch Status</button>
+                        <button onclick="addMetadataTag('library_status', 'In library')">Library Status</button>
+                    </div>
+                    <label style="font-size:11px; color:#aaa; display:block; margin-bottom:4px;">Simulate layout style</label>
+                    <div style="display: grid; grid-template-columns: 1fr; gap: 5px;">
+                        <button onclick="applyViewStyle('jellyfin_dense')">Jellyfin dense</button>
+                        <button onclick="applyViewStyle('seerr_rich')">Seerr rich</button>
+                        <button onclick="applyViewStyle('status_focus')">Status focus</button>
+                    </div>
+                    <p style="font-size:11px; color:#888; margin:8px 0 0;">Adds missing tags for that style and hides others. Save layout to keep.</p>
+                </div>
+            </div>
+
             <div class="control-group" id="group-omdb">
                 <h3 onclick="toggleGroup('group-omdb')"><span class="group-arrow collapsed">▼</span> <span
                         data-i18n="omdb_info">Kritiken & Infos (OMDb)</span></h3>

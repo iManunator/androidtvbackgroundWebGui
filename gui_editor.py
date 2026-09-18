@@ -1,4 +1,4 @@
-CURRENT_VERSION = "1.3.0"
+CURRENT_VERSION = "1.4.0"
 import os
 import sys
 import json
@@ -30,6 +30,7 @@ from jellyfin_auth import (
     resolve_jellyfin_user_id,
 )
 import seerr_client
+import media_status
 
 # Import the missing search trigger script
 try:
@@ -463,6 +464,7 @@ def format_jellyfin_item(item, clean_url, api_key, user_id=None):
             p.get('Name') for p in people if p.get('Type') == 'Writer'
         ))
 
+    status = media_status.jellyfin_status_fields(item)
     return {
         "id": item.get('Id'),
         "title": item.get('Name'),
@@ -482,7 +484,8 @@ def format_jellyfin_item(item, clean_url, api_key, user_id=None):
         "officialRating": item.get('OfficialRating'),
         "inheritedParentalRatingValue": item.get('InheritedParentalRatingValue'),
         "imdb_id": item.get('ProviderIds', {}).get('Imdb'),
-        "source": "Jellyfin"
+        "source": "Jellyfin",
+        **status,
     }
 
 def fetch_jellyfin_list(config, filter_mode, filter_val, item_types, limit_count, request_args):
@@ -762,7 +765,7 @@ def format_seerr_item(norm: dict, config: dict = None) -> dict:
     if not genres and merged.get("genre_list"):
         genres = ", ".join(merged["genre_list"])
 
-    return {
+    payload = {
         "id": f"jellyseerr-{mt}-{tid}",
         "title": merged.get("title"),
         "year": merged.get("year"),
@@ -807,7 +810,16 @@ def format_seerr_item(norm: dict, config: dict = None) -> dict:
         "action_url": merged.get("seerr_url") or norm.get("seerr_url"),
         "media_type": mt,
         "tmdb_id": tid,
+        "releaseDate": merged.get("releaseDate") or norm.get("release_date") or norm.get("releaseDate"),
+        "firstAirDate": merged.get("firstAirDate") or norm.get("first_air_date") or norm.get("firstAirDate"),
     }
+    media_status.apply_seerr_status(payload, norm)
+    # Cross-link Jellyfin watch status when possible (in library or same title in JF)
+    try:
+        media_status.enrich_with_jellyfin_watch(payload, config)
+    except Exception as e:
+        print(f"Seerr Jellyfin watch enrich error: {e}")
+    return payload
 
 
 def fetch_seerr_list(config, filter_mode, filter_val, item_types, limit_count, request_args=None):
@@ -935,7 +947,7 @@ def get_random_media():
             "?Recursive=true&IncludeItemTypes=Movie,Series&ExcludeItemTypes=BoxSet"
             "&SortBy=Random&Limit=50"
             "&Fields=Type,Overview,Genres,CommunityRating,ProductionYear,RunTimeTicks,"
-            "ImageTags,Path,ProviderIds,OfficialRating,InheritedParentalRatingValue,People"
+            "ImageTags,Path,ProviderIds,OfficialRating,InheritedParentalRatingValue,People,UserData"
         )
         
         try:
@@ -1247,13 +1259,13 @@ def get_media_item(item_id):
                 url = (
                     f"{clean_url}/Users/{user_id}/Items/{actual_id}"
                     "?Fields=Type,Overview,Genres,CommunityRating,ProductionYear,RunTimeTicks,"
-                    "ImageTags,Path,ProviderIds,OfficialRating,InheritedParentalRatingValue,People"
+                    "ImageTags,Path,ProviderIds,OfficialRating,InheritedParentalRatingValue,People,UserData"
                 )
             else:
                 url = (
                     f"{clean_url}/Items/{actual_id}"
                     "?Fields=Type,Overview,Genres,CommunityRating,ProductionYear,RunTimeTicks,"
-                    "ImageTags,Path,ProviderIds,OfficialRating,InheritedParentalRatingValue,People"
+                    "ImageTags,Path,ProviderIds,OfficialRating,InheritedParentalRatingValue,People,UserData"
                 )
             try:
                 r = requests.get(url, headers=headers, timeout=5)

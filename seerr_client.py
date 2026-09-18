@@ -531,6 +531,8 @@ def normalize_result(item: dict, base_url: str) -> Optional[dict]:
         "logo_url": logo_url,
         "media_info": media_info,
         "seerr_url": deep_link(base_url, media_type, int(tmdb_id)),
+        "release_date": item.get("releaseDate") or item.get("release_date") or "",
+        "first_air_date": item.get("firstAirDate") or item.get("first_air_date") or "",
         **mapped,
     }
 
