@@ -1,8 +1,13 @@
 {
+    "general": {
+        "overwrite_existing": false,
+        "timezone_offset": 1
+    },
     "jellyfin": {
         "url": "http://your-ip:8096",
-        "api_key": "YOUR_API_KEY",
-        "user_id": "YOUR_USER_ID"
+        "api_key": "YOUR_JELLYFIN_API_KEY",
+        "user_id": "YOUR_USER_ID",
+        "excluded_libraries": ""
     },
     "plex": {
         "url": "",
@@ -10,9 +15,32 @@
     },
     "tmdb": {
         "api_key": "",
-        "language": "de-DE"
+        "language": "en-US"
+    },
+    "radarr": {
+        "url": "",
+        "api_key": ""
+    },
+    "sonarr": {
+        "url": "",
+        "api_key": ""
+    },
+    "jellyseerr": {
+        "url": "",
+        "api_key": "",
+        "trending_window": "week",
+        "default_request_seasons": "all"
+    },
+    "trakt": {
+        "api_key": "",
+        "username": "",
+        "listname": ""
+    },
+    "omdb": {
+        "api_key": ""
     },
     "editor": {
         "resolution": "1080"
-    }
+    },
+    "cron_jobs": []
 }

@@ -3,7 +3,7 @@ version: '3.8'
 services:
   tv-background:
     build: .
-    image: butch708/tv-background-suite:latest
+    image: ghcr.io/imanunator/androidtvbackgroundwebgui:latest
     ports:
       - "5000:5000"
     volumes:
@@ -21,6 +21,7 @@ services:
       - ./trakt_backgrounds:/app/trakt_backgrounds
       - ./plexfriend_backgrounds:/app/plexfriend_backgrounds
     extra_hosts:
-      - "truenas:192.168.178.92"
       - "host.docker.internal:host-gateway"
+      # Optional: map a LAN hostname to an IP
+      # - "truenas:192.168.1.100"
     restart: unless-stopped

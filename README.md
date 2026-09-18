@@ -1,8 +1,8 @@
 # TV Background Suite & Web Editor
 
-**TV Background Suite** is a powerful, web-based tool designed to generate high-quality, customized background images and posters for media servers like **Jellyfin**, **Emby**, and **Plex**, or for use with Android TV launchers.
+**TV Background Suite** is a web-based tool for generating customized background images and posters for media servers like **Jellyfin**, **Plex**, and **Seerr/Jellyseerr**, or for Android TV launchers.
 
-It features a full WYSIWYG (What You See Is What You Get) editor allowing you to add metadata, ratings, and apply advanced texture effects to text.
+It includes a full WYSIWYG editor, streaming-style layout presets (Netflix / Prime / Google TV), watch-status badges, scheduled generation, and ID-based skip/replace so daily cron jobs stay fresh without duplicating titles.
 
 | Editor Interface | Saved Layouts |
 | :---: | :---: |
@@ -12,53 +12,48 @@ It features a full WYSIWYG (What You See Is What You Get) editor allowing you to
 | :---: | :---: |
 | ![Google TV](https://github.com/user-attachments/assets/b1525643-8a44-43dc-beaf-5f95b1d9de2a) | ![ProjectIvy](https://github.com/user-attachments/assets/72942128-19cf-4b17-9273-291ab7efe823) |
 
-## ✨ Features
+## Features
 
-- **Web-Based Editor:** Create layouts visually in your browser. Drag, drop, and customize text and images.
-- **Media Server Integration:** Connects directly to **Jellyfin**, **Plex**, **Radarr**, **Sonarr**, **Trakt**, and **TMDB** to fetch metadata and artwork automatically.
-- **Advanced Layout Tools:**
-    - **Smart Positioning:** Auto-aligns new tags.
-    - **Manual Mode:** Toggle "Snap to Objects" for free positioning.
-    - **Layer Control:** Move elements up/down in the stack.
-    - **Bulk Actions:** Apply font, size, or color to all tags at once.
-- **Texture Manager:** Apply "Magic Textures" (e.g., Gold, Silver, Grunge) to your text for a premium look.
-- **Overlay Manager:** Easily upload and place guide overlays (e.g., for Google TV or ProjectIvy).
-- **Font Manager:** Upload and use your own `.ttf` or `.otf` fonts.
-- **Icon Manager:** Upload custom icons and logos to use in your designs.
-- **Saved Layouts:** Save your designs as templates and reload them later.
-- **Batch Processing:** Automate the generation of backgrounds for entire libraries or collections.
-- **Gallery & Editing:** View generated images and **re-edit** them by loading their original layout state.
-- **Multi-Language:** Interface available in English, German, Italian, French, Polish, Czech, Spanish, and Romanian.
-- **Docker Ready:** Easy deployment on NAS systems like Unraid, TrueNAS, or Synology.
+- **Web editor:** Drag-and-drop layouts, fonts, textures, overlays, and icons.
+- **Providers:** Jellyfin, Plex, Seerr/Jellyseerr, Radarr, Sonarr, Trakt, TMDB, OMDb.
+- **Streaming presets:** Netflix Hero, Prime Cinematic, Google TV Clean, Status Focus, Jellyfin Dense (left-top chrome).
+- **Watch status:** Unwatched / Partly watched / Watched from Jellyfin (series use real episode counts).
+- **Seerr integration:** Trending wallpapers, library state, request caption, ratings enrichment.
+- **Cron & batch:** Schedule daily runs; **skip titles already generated** (IMDb/TMDB/Jellyfin id); **overwrite** replaces the same show; **cleanup** removes titles no longer in the list.
+- **Gallery:** Browse, re-edit, and manage generated images.
+- **Multi-language UI:** English, German, Italian, French, Polish, Czech, Spanish, Romanian.
+- **Docker / Portainer ready.**
 
-## 🗺️ Roadmap
+## Roadmap
 
-- **Android TV App:** A dedicated Android TV application is planned to automatically fetch and rotate these backgrounds directly on your device.
+- **Android TV App:** Fetch and rotate backgrounds on-device (planned).
 
 ---
 
-## 🧩 Projectivy Launcher Plugin
+## Projectivy Launcher Plugin
 
-For users of the **Projectivy Launcher**, there is now a dedicated plugin available to easily integrate the generated backgrounds directly into your launcher.
+For **Projectivy Launcher**, use the dedicated plugin:
 
-👉 **[Get the Projectivy TVBG Suite Plugin](https://github.com/z9m/projectivy-tvbgsuite-plugin)**
+**[Projectivy TVBG Suite Plugin](https://github.com/z9m/projectivy-tvbgsuite-plugin)**
 
 ---
 
-## 🚀 Installation (Docker)
+## Installation (Docker)
 
-The easiest way to run the application is via Docker.
+### GHCR image (this fork)
 
-### Docker Compose (Recommended)
+```text
+ghcr.io/imanunator/androidtvbackgroundwebgui:latest
+```
 
-Create a `docker-compose.yml` file:
+Also tagged: `jellyfin12`, `seerr`, and commit SHA tags from CI.
+
+### Docker Compose
 
 ```yaml
-version: '3.8'
-
 services:
   tv-background:
-    image: butch708/tv-background-suite:latest
+    image: ghcr.io/imanunator/androidtvbackgroundwebgui:latest
     container_name: tv-background-editor
     ports:
       - "5000:5000"
@@ -73,12 +68,13 @@ services:
     restart: unless-stopped
 ```
 
-Run the container:
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
-Access the editor at: `http://YOUR_SERVER_IP:5000/editor`
+Open: `http://YOUR_SERVER_IP:5000/editor`
+
+> Copy `config.example.json` → `config.json` and fill in API keys in the UI (Settings). Never commit `config.json` or `.env`.
 
 ### Docker Run
 
@@ -88,65 +84,79 @@ docker run -d \
   -p 5000:5000 \
   -v /path/to/config.json:/app/config.json \
   -v /path/to/output:/app/editor_backgrounds \
-  butch708/tv-background-suite:latest
+  ghcr.io/imanunator/androidtvbackgroundwebgui:latest
 ```
 
 ---
 
-## 📂 Configuration & Volumes
+## Configuration & volumes
 
-To persist your data and access generated images, map the following volumes:
-
-| Container Path | Description |
+| Container path | Description |
 | :--- | :--- |
-| `/app/config.json` | Stores API keys, URLs, and general settings. |
-| `/app/layouts` | Stores your saved design layouts (`.json`). |
-| `/app/overlays` | Folder for custom overlay images (PNG). |
-| `/app/textures` | Folder for text texture patterns (JPG/PNG). |
-| `/app/fonts` | Folder for custom fonts (`.ttf`, `.otf`). |
-| `/app/editor_backgrounds` | **Output:** Images generated by the Web Editor.
+| `/app/config.json` | API keys, URLs, cron jobs (keep private). |
+| `/app/layouts` | Saved layouts (includes bundled streaming presets). |
+| `/app/overlays` | Guide overlays (PNG). |
+| `/app/textures` | Text textures. |
+| `/app/fonts` | Custom fonts (`.ttf` / `.otf`). |
+| `/app/custom_icons` | Custom icons/logos. |
+| `/app/editor_backgrounds` | **Output** gallery images. |
 
 ### Networking (DNS)
-If you are running this in Docker and trying to connect to a local media server (e.g., on the same NAS) using a hostname like `http://truenas:8096`, the container might not resolve the name.
 
-**Option 1 (Use IP):** Use the IP address of your server in the settings (e.g., `http://192.168.1.50:8096`).
+If the container cannot resolve a LAN hostname:
 
-**Option 2 (Use host.docker.internal):**
-Add this to your `docker-compose.yml`:
+**Use IP** in settings, or:
+
 ```yaml
     extra_hosts:
       - "host.docker.internal:host-gateway"
 ```
-Then, in the editor settings, use `http://host.docker.internal:8096` as the URL.
 
-**Option 3 (Map Hostname):**
-If you prefer to use your NAS hostname (e.g., `truenas`), map it manually:
-```yaml
-    extra_hosts:
-      - "truenas:192.168.1.100"
-```
+Then use `http://host.docker.internal:8096` (or map your NAS hostname → IP).
 
 ---
 
-## 🛠️ Usage
+## Usage
 
-1.  **Provider Settings:**
-    Go to the **Settings** tab. Enter your URL and API Keys for Jellyfin, Plex, or TMDB. Use the "Test Connection" buttons to verify connectivity.
-    
-2.  **Layout Editor:**
-    - Use **Shuffle Preview** to load random media from your connected services.
-    - Adjust text alignment, colors, and fonts.
-    - Apply **Textures** to text for artistic effects.
-    - Add **Metadata Tags** (Rating, Year, Runtime) dynamically.
+### Settings
 
-3.  **Batch Processing:**
-    Go to the **Batch Processing** tab to generate backgrounds for your entire library automatically based on your selected layout.
+Connect **Jellyfin**, **Seerr/Jellyseerr**, Plex, TMDB, etc. Use **Test connection** where available. Leave Jellyfin User ID blank to auto-resolve an admin user.
+
+### Layouts
+
+1. Click a streaming preset (e.g. **Netflix Hero**), or design your own.
+2. **Shuffle** to preview random Jellyfin / Seerr / Plex / TMDB items.
+3. Change **Layout Name** and **Save Layout** to keep a copy (built-in presets can be reseeded on upgrade).
+
+### Cron (daily fresh wallpapers)
+
+Recommended for Seerr trending or Jellyfin libraries:
+
+| Option | Effect |
+| :--- | :--- |
+| **Overwrite off** (default) | Skip shows that already have a wallpaper (matched by IMDb / TMDB / Jellyfin id). Only **new** titles are generated. |
+| **Overwrite / replace same show** | Delete prior wallpapers for that title, then recreate. |
+| **Cleanup titles not in list** | Remove gallery files whose media is no longer in today’s Seerr/Jellyfin list. |
+| **Refresh watch status** | Forces overwrite so watch badges update. |
+
+Run daily (or more often): keep overwrite **off** + cleanup **on** to accumulate new titles and drop ones that left the list.
+
+### Batch
+
+Same skip / replace / cleanup behavior as cron when generating from the Batch tab.
 
 ---
 
-## 🖼️ Gallery
+## Security notes
 
-Here are some examples of what you can create with the TV Background Suite.
+- Store secrets only in **`config.json`** or a local **`.env`** (both gitignored).
+- Use **`config.example.json`** / **`.env.example`** as templates (placeholders only).
+- Do not commit real API keys, tokens, or user IDs.
+- GHCR login in CI uses `GITHUB_TOKEN` (Actions secret), not a personal token in the repo.
+
+---
+
+## Gallery examples
 
 | Predator (Magic Texture) | Freies Land (Clean Layout) |
 | :---: | :---: |
@@ -154,21 +164,19 @@ Here are some examples of what you can create with the TV Background Suite.
 | **Indiana Jones (Logo Integration)** | **Amsterdam (Custom Font)** |
 | ![Indiana Jones Example](https://github.com/user-attachments/assets/db6581c9-26b5-41f2-a787-05637e474632) | ![Amsterdam Example](https://github.com/user-attachments/assets/6751beb0-566b-45f3-9940-73e289394105) |
 
+## Contributing
 
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1.  Fork the Project
-2.  Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3.  Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4.  Push to the Branch (`git push origin feature/AmazingFeature`)
-5.  Open a Pull Request
+1. Fork the project  
+2. Create a feature branch (`git checkout -b feature/AmazingFeature`)  
+3. Commit (`git commit -m 'Add some AmazingFeature'`)  
+4. Push and open a Pull Request  
 
 ## Credits
 
-- **Original Project:** This project is a fork of androidtvbackground created by adelatour11.
-- **Development:** Major refactoring, Web GUI implementation, and Docker integration were developed with the assistance of **Gemini Code Assist**.
+- **Original project:** [androidtvbackground](https://github.com/adelatour11/androidtvbackground) by adelatour11  
+- **Upstream suite / Docker:** community forks including butch708’s TV Background Suite  
+- **This fork:** Jellyfin 12 auth, Seerr, streaming layouts, watch status, cron ID skip/replace  
 
-## 📄 License
+## License
+
 Distributed under the MIT License.

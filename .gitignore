@@ -1,19 +1,22 @@
-env
-# *_backgrounds/*
-*.ttf
-node_modules/
-
-# Sensitive configuration
+# Sensitive configuration / secrets — never commit real values
 config.json
+.env
+.env.local
+*.pem
+*.key
 
-# Python environment
+# Python
 __pycache__/
 *.pyc
 venv/
-.env
 
-# OS specific files
+# Node
+node_modules/
+
+# Fonts / OS
+*.ttf
 .DS_Store
 Thumbs.db
 
 # Logs
+*.log
