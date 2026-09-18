@@ -1,4 +1,5 @@
-CURRENT_VERSION = "1.5.2"import os
+CURRENT_VERSION = "1.5.3"
+import os
 import sys
 import json
 import random
