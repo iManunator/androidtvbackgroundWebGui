@@ -1619,17 +1619,13 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                         val = mediaData.availability_label || mediaData.availability || '';
                         break;
                     case 'watch_status': {
-                        const wState = mediaData.watch_state || '';
+                        const wState = mediaData.watch_state || 'unwatched';
                         let wLabel = mediaData.watch_status || null;
-                        // Prefer watch label; for Seerr-only without watch, hide
-                        if (!wLabel && wState) {
-                            wLabel = wState === 'watched' ? 'Watched' : (wState === 'partially_watched' ? 'In progress' : 'Unwatched');
+                        if (!wLabel || !String(wLabel).trim()) {
+                            wLabel = wState === 'watched' ? 'Watched'
+                                : (wState === 'partially_watched' ? 'In progress' : 'Unwatched');
                         }
-                        if (!wLabel) {
-                            obj.set('visible', false);
-                            val = undefined;
-                            break;
-                        }
+                        // Always show watch chip on layouts that include this tag
                         let wIcon = '/static/provider_logos/watch_unwatched.svg';
                         if (wState === 'watched' || /^(watched)$/i.test(String(wLabel))) {
                             wIcon = '/static/provider_logos/watch_watched.svg';
@@ -1698,7 +1694,7 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                             imdb: '/static/provider_logos/imdblogo.png',
                             rt: '/static/provider_logos/rottentomatos.png',
                             tmdb: '/static/provider_logos/tmdblogo.png',
-                            community: '/static/provider_logos/jellyfinlogo.png'
+                            community: '/static/provider_logos/rating_star.svg'
                         };
                         const logoUrl = scoreLogos[pSrc] || scoreLogos.community;
                         const label = String(pScore);

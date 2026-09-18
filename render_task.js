@@ -1623,15 +1623,11 @@ function getCertificationFilename(rating) {
                     val = data.availability_label || data.availability || '';
                     break;
                 case 'watch_status': {
-                    const wState = data.watch_state || '';
+                    const wState = data.watch_state || 'unwatched';
                     let wLabel = data.watch_status || null;
-                    if (!wLabel && wState) {
-                        wLabel = wState === 'watched' ? 'Watched' : (wState === 'partially_watched' ? 'In progress' : 'Unwatched');
-                    }
-                    if (!wLabel) {
-                        obj.set('visible', false);
-                        val = undefined;
-                        break;
+                    if (!wLabel || !String(wLabel).trim()) {
+                        wLabel = wState === 'watched' ? 'Watched'
+                            : (wState === 'partially_watched' ? 'In progress' : 'Unwatched');
                     }
                     let wFile = 'watch_unwatched.svg';
                     if (wState === 'watched' || /^(watched)$/i.test(String(wLabel))) wFile = 'watch_watched.svg';
@@ -1704,14 +1700,15 @@ function getCertificationFilename(rating) {
                         imdb: path.join(__dirname, 'static', 'provider_logos', 'imdblogo.png'),
                         rt: path.join(__dirname, 'static', 'provider_logos', 'rottentomatos.png'),
                         tmdb: path.join(__dirname, 'static', 'provider_logos', 'tmdblogo.png'),
-                        community: path.join(__dirname, 'static', 'provider_logos', 'jellyfinlogo.png')
+                        community: path.join(__dirname, 'static', 'provider_logos', 'rating_star.svg')
                     };
                     const logoPath = scoreLogos[pSrc] || scoreLogos.community;
                     const label = String(pScore);
                     if (fs.existsSync(logoPath)) {
                         const imgData = fs.readFileSync(logoPath);
-                        const ext = path.extname(logoPath).slice(1);
-                        const src = `data:image/${ext};base64,${imgData.toString('base64')}`;
+                        const ext = path.extname(logoPath).slice(1).toLowerCase();
+                        const mime = ext === 'svg' ? 'svg+xml' : ext;
+                        const src = `data:image/${mime};base64,${imgData.toString('base64')}`;
                         const p = new Promise(resolve => {
                             fabric.Image.fromURL(src, (img) => {
                                 if (!img) {

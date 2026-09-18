@@ -97,8 +97,8 @@ def empty_watch() -> Dict[str, Any]:
     return {
         "watch_state": "unwatched",
         "watch_percent": 0,
-        "watch_status": "",
-        "status_label": "",
+        "watch_status": WATCH_LABELS["unwatched"],
+        "status_label": WATCH_LABELS["unwatched"],
     }
 
 
@@ -168,9 +168,12 @@ def apply_seerr_status(payload: dict, norm: Optional[dict] = None) -> dict:
     payload["library_status"] = label
     if "watch_state" not in payload:
         payload.update(empty_watch())
-        if state != "in_library":
-            payload["watch_status"] = ""
-            payload["status_label"] = label
+    if state != "in_library":
+        # Keep a visible Unwatched chip on streaming layouts; library label stays separate
+        if not payload.get("watch_status"):
+            payload["watch_status"] = WATCH_LABELS["unwatched"]
+            payload["watch_state"] = "unwatched"
+        payload["status_label"] = label
     return payload
 
 
