@@ -1147,14 +1147,18 @@
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-bottom: 8px;">
                         <button onclick="addMetadataTag('watch_status', 'Watched')">Watch Status</button>
                         <button onclick="addMetadataTag('library_status', 'In library')">Library Status</button>
+                        <button onclick="addMetadataTag('primary_score', '8.5')" style="grid-column: span 2;">Primary Score (one)</button>
                     </div>
-                    <label style="font-size:11px; color:#aaa; display:block; margin-bottom:4px;">Simulate layout style</label>
+                    <label style="font-size:11px; color:#aaa; display:block; margin-bottom:4px;">Streaming presets — one score, JF/Seerr logo, left-top</label>
                     <div style="display: grid; grid-template-columns: 1fr; gap: 5px;">
-                        <button onclick="applyViewStyle('jellyfin_dense')">Jellyfin dense</button>
-                        <button onclick="applyViewStyle('seerr_rich')">Seerr rich</button>
-                        <button onclick="applyViewStyle('status_focus')">Status focus</button>
+                        <button onclick="loadStreamingLayout('Netflix Hero')">Netflix Hero</button>
+                        <button onclick="loadStreamingLayout('Prime Cinematic')">Prime Cinematic</button>
+                        <button onclick="loadStreamingLayout('Google TV Clean')">Google TV Clean</button>
+                        <button onclick="loadStreamingLayout('Status Focus')">Status Focus</button>
+                        <button onclick="loadStreamingLayout('Jellyfin Dense')">Jellyfin Dense</button>
+                        <button onclick="loadStreamingLayout('Default')">Default (streaming)</button>
                     </div>
-                    <p style="font-size:11px; color:#888; margin:8px 0 0;">Adds missing tags for that style and hides others. Save layout to keep.</p>
+                    <p style="font-size:11px; color:#888; margin:8px 0 0;">Loads a pre-saved left-top layout. JF vs Seerr shown as a small logo only.</p>
                 </div>
             </div>
 

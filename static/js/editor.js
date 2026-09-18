@@ -1379,11 +1379,16 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                             // Scale to fit within the slot while maintaining aspect ratio
                             const scale = Math.min(slotW / preloadedLogo.width, slotH / preloadedLogo.height);
 
-                            const newLeft = getNewLogoLeft(obj, preloadedLogo.width, scale);
+                            const newLeft = (window.layoutAnchorMode === 'left_top')
+                                ? Math.max(parseInt(document.getElementById('marginLeftInput')?.value) || 50, obj.left)
+                                : getNewLogoLeft(obj, preloadedLogo.width, scale);
+                            const newTop = (window.layoutAnchorMode === 'left_top')
+                                ? (parseInt(document.getElementById('marginTopInput')?.value) || obj.top || 70)
+                                : obj.top;
 
                             preloadedLogo.set({ 
                                 left: newLeft, 
-                                top: obj.top, 
+                                top: newTop, 
                                 dataTag: 'title', 
                                 logoAutoFix: autoFix,
                                 slotWidth: slotW,
@@ -1401,28 +1406,28 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                                 fabric.Image.fromURL(proxiedLogo, function (img, isError) {
                                     if (isError || !img) { canvas.remove(obj); r(); return; }
 
-                                    // --- STRICT FIXED HEIGHT LOGIC ---
-                                    const targetHeight = obj.slotHeight || obj.getScaledHeight();
-                                    img.scaleToHeight(targetHeight);
+                                    // Contain within layout slot (logo-agnostic for wide/tall clearlogos)
+                                    const slotW = obj.slotWidth || Math.min(obj.getScaledWidth() || canvas.width * 0.45, canvas.width * 0.45);
+                                    const slotH = obj.slotHeight || obj.getScaledHeight() || (canvas.height * 0.12);
+                                    const scale = Math.min(slotW / img.width, slotH / img.height);
+                                    img.scale(scale);
 
-                                    // Check width constraints
                                     const marginLeft = parseInt(document.getElementById('marginLeftInput').value) || 50;
-                                    const marginRight = parseInt(document.getElementById('marginRightInput').value) || 50;
-                                    const maxW = canvas.width - marginLeft - marginRight;
-
-                                    if (img.getScaledWidth() > maxW) {
-                                        img.scaleToWidth(maxW);
+                                    let newLeft = getNewLogoLeft(obj, img.width, img.scaleX);
+                                    if (window.layoutAnchorMode === 'left_top') {
+                                        newLeft = Math.max(marginLeft, obj.left);
                                     }
-
-                                    const newLeft = getNewLogoLeft(obj, img.width, img.scaleX);
+                                    const newTop = (window.layoutAnchorMode === 'left_top')
+                                        ? (parseInt(document.getElementById('marginTopInput')?.value) || obj.top || 70)
+                                        : obj.top;
 
                                     img.set({ 
                                         left: newLeft, 
-                                        top: obj.top, 
+                                        top: newTop, 
                                         dataTag: 'title', 
                                         logoAutoFix: autoFix,
-                                        slotWidth: img.getScaledWidth(),
-                                        slotHeight: img.getScaledHeight()
+                                        slotWidth: slotW,
+                                        slotHeight: slotH
                                     });
                                     canvas.remove(obj); canvas.add(img);
                                     r();
@@ -1580,6 +1585,66 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                     case 'library_status':
                         val = mediaData.library_status || null;
                         break;
+                    case 'primary_score': {
+                        const pScore = mediaData.primary_score_label || mediaData.primary_score;
+                        const pSrc = mediaData.primary_score_source || 'imdb';
+                        obj.set({ originX: 'left', originY: 'top' });
+                        if (!pScore) {
+                            obj.set('visible', false);
+                            val = undefined;
+                            break;
+                        }
+                        const scoreLogos = {
+                            imdb: '/static/provider_logos/imdblogo.png',
+                            rt: '/static/provider_logos/rottentomatos.png',
+                            tmdb: '/static/provider_logos/tmdblogo.png',
+                            community: '/static/provider_logos/jellyfinlogo.png'
+                        };
+                        const logoUrl = scoreLogos[pSrc] || scoreLogos.imdb;
+                        const label = String(pScore);
+                        const p = new Promise(resolve => {
+                            fabric.Image.fromURL(logoUrl, function (img, isError) {
+                                if (isError || !img) {
+                                    obj.set({ text: label, visible: true });
+                                    resolve();
+                                    return;
+                                }
+                                let fontSize = 32;
+                                let fill = 'white';
+                                let fontFamily = 'Roboto';
+                                let shadow = '2px 2px 8px rgba(0,0,0,0.7)';
+                                if (obj.type === 'group' && obj.getObjects) {
+                                    const t = obj.getObjects().find(o => o.type === 'i-text' || o.type === 'text');
+                                    if (t) {
+                                        if (t.fontSize) fontSize = t.fontSize;
+                                        if (t.fill) fill = t.fill;
+                                        if (t.fontFamily) fontFamily = t.fontFamily;
+                                        if (t.shadow) shadow = t.shadow;
+                                    }
+                                } else if (obj.fontSize) {
+                                    fontSize = obj.fontSize;
+                                }
+                                const text = new fabric.IText(label, {
+                                    fontFamily, fontSize, fill, editable: false, shadow
+                                });
+                                img.scaleToHeight(text.getScaledHeight());
+                                img.set({ left: 0, top: 0 });
+                                text.set({ left: img.getScaledWidth() + 12, top: 0 });
+                                const left = obj.left;
+                                const top = obj.top;
+                                const group = new fabric.Group([img, text], {
+                                    left, top, originX: 'left', originY: 'top',
+                                    dataTag: 'primary_score', primaryScoreSource: pSrc
+                                });
+                                canvas.remove(obj);
+                                canvas.add(group);
+                                resolve();
+                            }, { crossOrigin: 'anonymous' });
+                        });
+                        promises.push(p);
+                        val = undefined;
+                        break;
+                    }
                     case 'runtime':
                         val = mediaData.runtime;
                         const rtCheck = String(val || "").toLowerCase().replace(/\s/g, '');
@@ -1595,6 +1660,7 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                         const avail = mediaData.availability;
                         const libState = mediaData.library_state || '';
 
+                        // Logo-only: prefer library_state, always no prose for JF/Seerr
                         if (libState === 'in_library' || srcVal === 'Jellyfin' || isJellyfinMedia(mediaData)) {
                             pText = "";
                             pLogo = "jellyfinlogo.png";
@@ -1602,19 +1668,19 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                             pText = "";
                             pLogo = "seerrlogo.png";
                         } else if (srcVal === 'TMDB') {
-                            pText = "Now Trending on ";
+                            pText = "";
                             pLogo = "tmdblogo.png";
                         } else if (srcVal === 'Trakt') {
-                            pText = "Now on my watchlist ";
+                            pText = "";
                             pLogo = "traktlogo.png";
                         } else if (srcVal === 'Plex') {
-                            pText = "Now available on ";
+                            pText = "";
                             pLogo = "plexlogo.png";
-                        } else if (['Sonarr', 'Radarr', 'Jellyseerr'].includes(srcVal) || (srcVal && srcVal.includes('Missing'))) {
-                            pText = (srcVal && srcVal.includes('Missing')) ? "Requested on " : "Soon available on ";
+                        } else if (['Sonarr', 'Radarr'].includes(srcVal) || (srcVal && srcVal.includes('Missing'))) {
+                            pText = "";
                             pLogo = "jellyfinlogo.png";
                         } else {
-                            pText = "Now available on ";
+                            pText = "";
                             pLogo = "jellyfinlogo.png";
                         }
 
@@ -2326,88 +2392,47 @@ function addMetadataTag(type, placeholder) {
     finalize(textObj);
 }
 
-const VIEW_STYLE_PRESETS = {
-    jellyfin_dense: {
-        keep: new Set(['background', 'fade_effect', 'ambilight_bg', 'guide_overlay']),
-        tags: [
-            ['title', 'TITLE / LOGO'],
-            ['overview', 'Movie description...'],
-            ['genres', 'Action, Sci-Fi'],
-            ['rating', 'IMDb: 8.5'],
-            ['runtime', '2h 15m'],
-            ['actors', 'Actor 1, Actor 2...'],
-            ['provider_source', 'Now available on...'],
-            ['watch_status', 'Watched'],
-            ['library_status', 'In library']
-        ]
-    },
-    seerr_rich: {
-        keep: new Set(['background', 'fade_effect', 'ambilight_bg', 'guide_overlay']),
-        tags: [
-            ['title', 'TITLE / LOGO'],
-            ['tagline', 'A brand new day...'],
-            ['genres', 'Action, Adventure'],
-            ['status', 'Released'],
-            ['release_theatrical', '2026-07-12'],
-            ['provider_source', 'Now available on...'],
-            ['library_status', 'On Seerr'],
-            ['watch_status', 'Unwatched']
-        ],
-        ratingBadges: ['seerr_imdb', 'seerr_rt', 'seerr_tmdb']
-    },
-    status_focus: {
-        keep: new Set(['background', 'fade_effect', 'ambilight_bg', 'guide_overlay']),
-        tags: [
-            ['title', 'TITLE / LOGO'],
-            ['library_status', 'In library'],
-            ['watch_status', 'Watched'],
-            ['provider_source', 'Now available on...']
-        ]
+const STREAMING_LAYOUT_PRESETS = [
+    { name: 'Netflix Hero', label: 'Netflix Hero' },
+    { name: 'Prime Cinematic', label: 'Prime Cinematic' },
+    { name: 'Google TV Clean', label: 'Google TV Clean' },
+    { name: 'Status Focus', label: 'Status Focus' },
+    { name: 'Jellyfin Dense', label: 'Jellyfin Dense' },
+    { name: 'Default', label: 'Default (streaming)' }
+];
+
+async function applyViewStyle(styleKey) {
+    // Map legacy simulate keys → bundled layout names
+    const map = {
+        jellyfin_dense: 'Jellyfin Dense',
+        seerr_rich: 'Netflix Hero',
+        status_focus: 'Status Focus',
+        netflix_hero: 'Netflix Hero',
+        prime_cinematic: 'Prime Cinematic',
+        google_tv: 'Google TV Clean',
+        default: 'Default'
+    };
+    const layoutName = map[styleKey] || styleKey || 'Netflix Hero';
+    await loadStreamingLayout(layoutName);
+}
+
+async function loadStreamingLayout(name) {
+    if (!name) return;
+    try {
+        await loadLayout(name, true);
+        window.layoutAnchorMode = 'left_top';
+        const alignSel = document.getElementById('tagAlignSelect');
+        if (alignSel) alignSel.value = 'left';
+        const textAlign = document.getElementById('textContentAlignSelect');
+        if (textAlign) textAlign.value = 'left';
+        if (typeof lastFetchedData !== 'undefined' && lastFetchedData) {
+            await previewTemplate(lastFetchedData);
+        }
+        if (typeof saveToLocalStorage === 'function') saveToLocalStorage();
+    } catch (e) {
+        console.error('Failed to load streaming layout', name, e);
+        alert('Could not load layout: ' + name);
     }
-};
-
-function applyViewStyle(styleKey) {
-    const preset = VIEW_STYLE_PRESETS[styleKey];
-    if (!preset || !canvas) return;
-
-    const wanted = new Set(preset.tags.map(t => t[0]).concat(preset.ratingBadges || []));
-    const protectedTags = preset.keep || new Set();
-
-    // Hide metadata tags not in this style (keep structural layers)
-    canvas.getObjects().forEach(obj => {
-        const tag = obj.dataTag;
-        if (!tag || protectedTags.has(tag)) return;
-        if (wanted.has(tag)) {
-            obj.set('visible', true);
-        } else {
-            obj.set('visible', false);
-        }
-    });
-
-    // Add missing tags
-    preset.tags.forEach(([type, placeholder]) => {
-        const existing = canvas.getObjects().find(o => o.dataTag === type);
-        if (!existing) {
-            addMetadataTag(type, placeholder);
-        } else {
-            existing.set('visible', true);
-        }
-    });
-
-    (preset.ratingBadges || []).forEach(kind => {
-        const existing = canvas.getObjects().find(o => o.dataTag === kind);
-        if (!existing && typeof addSeerrRatingBadge === 'function') {
-            addSeerrRatingBadge(kind);
-        } else if (existing) {
-            existing.set('visible', true);
-        }
-    });
-
-    canvas.requestRenderAll();
-    if (typeof lastFetchedData !== 'undefined' && lastFetchedData) {
-        previewTemplate(lastFetchedData);
-    }
-    if (typeof saveToLocalStorage === 'function') saveToLocalStorage();
 }
 
 function addLogo(url) {
@@ -2569,6 +2594,21 @@ function getTagsMaxWidth() {
 
 function updateVerticalLayout(skipRender = false, retryCount = 0) {
     if (!canvas) return Promise.resolve();
+
+    // Streaming left-top presets: keep title pinned; do not relocate chrome to bottom
+    if (window.layoutAnchorMode === 'left_top' && retryCount === 0) {
+        const marginTop = parseInt(document.getElementById('marginTopInput')?.value) || 70;
+        const marginLeft = parseInt(document.getElementById('marginLeftInput')?.value) || 80;
+        const title = canvas.getObjects().find(o => o.dataTag === 'title');
+        if (title) {
+            if (title.left < marginLeft) title.set('left', marginLeft);
+            if (title.top < marginTop) title.set('top', marginTop);
+            // Prefer staying near top — never push title into lower third
+            const maxTop = canvas.height * 0.22;
+            if (title.top > maxTop) title.set('top', marginTop);
+            title.setCoords();
+        }
+    }
 
     // Remove existing separators (Optimized: remove all at once)
     const separators = canvas.getObjects().filter(o => o.dataTag === 'separator');
@@ -5316,6 +5356,13 @@ async function loadLayout(name, silent = false) {
 
             // --- CALLBACK START (Wird ausgeführt, wenn alles geladen ist) ---
             canvas.getObjects().forEach(o => { if (o.dataTag === 'overview') o.set('objectCaching', false); });
+
+            // Streaming presets: lock left-top chrome
+            if (data.layout_anchor === 'left_top' || data.managed_preset) {
+                window.layoutAnchorMode = 'left_top';
+            } else {
+                window.layoutAnchorMode = '';
+            }
 
             mainBg = canvas.getObjects().find(o => o.dataTag === 'background');
             const title = canvas.getObjects().find(o => o.dataTag === 'title' && o.type === 'image');

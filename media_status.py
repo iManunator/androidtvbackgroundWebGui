@@ -174,6 +174,57 @@ def apply_seerr_status(payload: dict, norm: Optional[dict] = None) -> dict:
     return payload
 
 
+def attach_primary_score(payload: dict) -> dict:
+    """Pick a single display score: IMDb → RT critics → TMDb → community rating."""
+    if not isinstance(payload, dict):
+        return payload
+
+    def _clean(val: Any) -> Optional[str]:
+        if val in (None, "", "N/A", "n/a"):
+            return None
+        s = str(val).strip()
+        return s or None
+
+    imdb = _clean(payload.get("seerr_imdb"))
+    if imdb:
+        payload["primary_score"] = imdb.replace("%", "")
+        payload["primary_score_source"] = "imdb"
+        payload["primary_score_label"] = payload["primary_score"]
+        return payload
+
+    rt = _clean(payload.get("seerr_rt"))
+    if rt:
+        label = rt if "%" in rt else f"{rt}%"
+        payload["primary_score"] = rt.replace("%", "")
+        payload["primary_score_source"] = "rt"
+        payload["primary_score_label"] = label
+        return payload
+
+    tmdb = _clean(payload.get("seerr_tmdb"))
+    if tmdb:
+        label = tmdb if "%" in tmdb else f"{tmdb}%"
+        payload["primary_score"] = tmdb.replace("%", "")
+        payload["primary_score_source"] = "tmdb"
+        payload["primary_score_label"] = label
+        return payload
+
+    rating = payload.get("rating")
+    if rating not in (None, "", "N/A"):
+        try:
+            label = f"{float(rating):.1f}"
+        except (TypeError, ValueError):
+            label = str(rating)
+        payload["primary_score"] = label
+        payload["primary_score_source"] = "community"
+        payload["primary_score_label"] = label
+        return payload
+
+    payload.setdefault("primary_score", "")
+    payload.setdefault("primary_score_source", "")
+    payload.setdefault("primary_score_label", "")
+    return payload
+
+
 def matches_watch_filter(watch_state: str, filt: str) -> bool:
     """Filter: all | unwatched | in_progress | watched."""
     filt = (filt or "all").strip().lower()

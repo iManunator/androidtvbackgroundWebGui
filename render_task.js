@@ -1628,6 +1628,69 @@ function getCertificationFilename(rating) {
                 case 'library_status':
                     val = data.library_status || null;
                     break;
+                case 'primary_score': {
+                    const pScore = data.primary_score_label || data.primary_score;
+                    const pSrc = data.primary_score_source || 'imdb';
+                    obj.set({ originX: 'left', originY: 'top' });
+                    if (!pScore) {
+                        obj.set('visible', false);
+                        val = undefined;
+                        break;
+                    }
+                    const scoreLogos = {
+                        imdb: path.join(__dirname, 'static', 'provider_logos', 'imdblogo.png'),
+                        rt: path.join(__dirname, 'static', 'provider_logos', 'rottentomatos.png'),
+                        tmdb: path.join(__dirname, 'static', 'provider_logos', 'tmdblogo.png'),
+                        community: path.join(__dirname, 'static', 'provider_logos', 'jellyfinlogo.png')
+                    };
+                    const logoPath = scoreLogos[pSrc] || scoreLogos.imdb;
+                    const label = String(pScore);
+                    if (fs.existsSync(logoPath)) {
+                        const imgData = fs.readFileSync(logoPath);
+                        const ext = path.extname(logoPath).slice(1);
+                        const src = `data:image/${ext};base64,${imgData.toString('base64')}`;
+                        const p = new Promise(resolve => {
+                            fabric.Image.fromURL(src, (img) => {
+                                if (!img) {
+                                    obj.set({ text: label, visible: true });
+                                    resolve();
+                                    return;
+                                }
+                                let fontSize = obj.fontSize || 32;
+                                let fill = obj.fill || 'white';
+                                let fontFamily = obj.fontFamily || 'Roboto';
+                                if (obj.type === 'group' && obj.getObjects) {
+                                    const t = obj.getObjects().find(o => o.type === 'i-text' || o.type === 'text');
+                                    if (t) {
+                                        if (t.fontSize) fontSize = t.fontSize;
+                                        if (t.fill) fill = t.fill;
+                                        if (t.fontFamily) fontFamily = t.fontFamily;
+                                    }
+                                }
+                                const text = new fabric.IText(label, {
+                                    fontFamily, fontSize, fill, editable: false,
+                                    shadow: '2px 2px 8px rgba(0,0,0,0.7)'
+                                });
+                                img.scaleToHeight(text.getScaledHeight());
+                                img.set({ left: 0, top: 0 });
+                                text.set({ left: img.getScaledWidth() + 12, top: 0 });
+                                const group = new fabric.Group([img, text], {
+                                    left: obj.left, top: obj.top,
+                                    originX: 'left', originY: 'top',
+                                    dataTag: 'primary_score'
+                                });
+                                canvas.remove(obj);
+                                canvas.add(group);
+                                resolve();
+                            });
+                        });
+                        promises.push(p);
+                        val = undefined;
+                    } else {
+                        val = label;
+                    }
+                    break;
+                }
                 case 'runtime':
                     val = data.runtime;
                     const rtCheck = String(val || "").toLowerCase().replace(/\s/g, '');
@@ -1722,7 +1785,7 @@ function getCertificationFilename(rating) {
                     const avail = data.availability;
                     const libState = data.library_state || '';
 
-                    // Logic based on library state / provider
+                    // Logo-only source mark (JF vs Seerr)
                     if (libState === 'in_library' || source === 'Jellyfin') {
                         providerText = "";
                         providerLogo = "jellyfinlogo.png";
@@ -1730,20 +1793,19 @@ function getCertificationFilename(rating) {
                         providerText = "";
                         providerLogo = "seerrlogo.png";
                     } else if (source === 'TMDB') {
-                        providerText = "Now Trending on ";
+                        providerText = "";
                         providerLogo = "tmdblogo.png";
                     } else if (source === 'Trakt') {
-                        providerText = "Now on my watchlist ";
+                        providerText = "";
                         providerLogo = "traktlogo.png";
                     } else if (source === 'Plex') {
-                        providerText = "Now available on ";
+                        providerText = "";
                         providerLogo = "plexlogo.png";
                     } else if (['Sonarr', 'Radarr', 'Jellyseerr'].includes(source) || (source && source.includes('Missing'))) {
-                        providerText = (source && source.includes('Missing')) ? "Requested on " : "Soon available on ";
+                        providerText = "";
                         providerLogo = "jellyfinlogo.png";
                     } else {
-                        // Default fallback
-                        providerText = "Now available on ";
+                        providerText = "";
                         providerLogo = "jellyfinlogo.png";
                     }
 
@@ -2055,8 +2117,8 @@ function getCertificationFilename(rating) {
                                 left: newLeft, top: oldState.top, originX: oldState.originX, originY: oldState.originY,
                                 dataTag: 'title',
                                 logoAutoFix: titleObj.logoAutoFix, // Propagate
-                                slotWidth: newW, // Update slot dimensions to new size
-                                slotHeight: img.getScaledHeight()
+                                slotWidth: slotW,
+                                slotHeight: slotH
                             });
                             canvas.add(img);
                             canvas.bringToFront(img);

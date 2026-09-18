@@ -1,4 +1,4 @@
-CURRENT_VERSION = "1.4.1"
+CURRENT_VERSION = "1.5.0"
 import os
 import sys
 import json
@@ -199,7 +199,17 @@ KNOWN_DIRS = [
 ]
 
 LAYOUTS_DIR = 'layouts'
+LAYOUT_BUNDLED_DIR = os.path.join(LAYOUTS_DIR, 'bundled')
 LAYOUT_PREVIEWS_DIR = os.path.join(LAYOUTS_DIR, 'previews')
+LAYOUT_PRESET_VERSION = 1
+MANAGED_LAYOUT_NAMES = {
+    "Default",
+    "Netflix Hero",
+    "Prime Cinematic",
+    "Google TV Clean",
+    "Status Focus",
+    "Jellyfin Dense",
+}
 OVERLAYS_DIR = 'overlays'
 OVERLAYS_JSON = 'overlays.json'
 TEXTURES_DIR = 'textures'
@@ -219,6 +229,48 @@ if not os.path.exists(FONTS_DIR):
     os.makedirs(FONTS_DIR)
 if not os.path.exists(CUSTOM_ICONS_DIR):
     os.makedirs(CUSTOM_ICONS_DIR)
+
+
+def seed_bundled_layouts():
+    """Copy/upgrade managed streaming presets from layouts/bundled into layouts/."""
+    if not os.path.isdir(LAYOUT_BUNDLED_DIR):
+        return
+    for fname in os.listdir(LAYOUT_BUNDLED_DIR):
+        if not fname.endswith(".json"):
+            continue
+        name = fname[:-5]
+        if name not in MANAGED_LAYOUT_NAMES:
+            continue
+        src = os.path.join(LAYOUT_BUNDLED_DIR, fname)
+        dst = os.path.join(LAYOUTS_DIR, fname)
+        try:
+            with open(src, "r", encoding="utf-8") as f:
+                bundled = json.load(f)
+        except Exception as e:
+            print(f"Skip bundled layout {fname}: {e}")
+            continue
+        bundled_ver = int(bundled.get("layout_preset_version") or LAYOUT_PRESET_VERSION)
+        existing_ver = -1
+        if os.path.exists(dst):
+            try:
+                with open(dst, "r", encoding="utf-8") as f:
+                    existing = json.load(f)
+                # Only auto-upgrade managed names (or files already marked managed)
+                if name in MANAGED_LAYOUT_NAMES or existing.get("managed_preset"):
+                    existing_ver = int(existing.get("layout_preset_version") or 0)
+                else:
+                    continue
+            except Exception:
+                existing_ver = 0
+        if bundled_ver > existing_ver or not os.path.exists(dst):
+            try:
+                shutil.copy2(src, dst)
+                print(f"Seeded layout preset: {name} (v{bundled_ver})")
+            except Exception as e:
+                print(f"Failed seeding {name}: {e}")
+
+
+seed_bundled_layouts()
 
 # --- CONFIGURATION LOGIC ---
 def load_config():
@@ -595,7 +647,8 @@ def format_jellyfin_item(item, clean_url, api_key, user_id=None, config=None):
         "source": "Jellyfin",
         **status,
     }
-    return enrich_jellyfin_with_seerr(payload, item, config)
+    payload = enrich_jellyfin_with_seerr(payload, item, config)
+    return media_status.attach_primary_score(payload)
 
 
 def fetch_jellyfin_list(config, filter_mode, filter_val, item_types, limit_count, request_args):
@@ -929,7 +982,7 @@ def format_seerr_item(norm: dict, config: dict = None) -> dict:
         media_status.enrich_with_jellyfin_watch(payload, config)
     except Exception as e:
         print(f"Seerr Jellyfin watch enrich error: {e}")
-    return payload
+    return media_status.attach_primary_score(payload)
 
 
 def fetch_seerr_list(config, filter_mode, filter_val, item_types, limit_count, request_args=None):
@@ -1761,9 +1814,12 @@ def test_trakt():
 
 @gui_editor_bp.route('/api/layouts/list')
 def list_layouts():
+    seed_bundled_layouts()
     layouts = []
     if os.path.exists(LAYOUTS_DIR):
-        layouts = [f.replace('.json', '') for f in os.listdir(LAYOUTS_DIR) if f.endswith('.json')]
+        layouts = [f.replace('.json', '') for f in os.listdir(LAYOUTS_DIR) if f.endswith('.json') and f != 'bundled']
+        # Exclude nested dirs accidentally listed
+        layouts = [n for n in layouts if os.path.isfile(os.path.join(LAYOUTS_DIR, f"{n}.json"))]
     return jsonify(sorted(layouts))
 
 @gui_editor_bp.route('/api/overlays/list')

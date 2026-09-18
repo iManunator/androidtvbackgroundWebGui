@@ -701,6 +701,7 @@ def fetch_items_and_process(job=None):
         
         # Enrich with OMDb data before rendering
         meta = enrich_with_omdb(meta, config)
+        meta = media_status.attach_primary_score(meta)
         
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_output_base_path = os.path.join(temp_dir, 'output')

@@ -32,6 +32,12 @@ populate_missing "/app/overlays" "/defaults/overlays"
 populate_missing "/app/textures" "/defaults/textures"
 populate_missing "/app/fonts" "/defaults/fonts"
 populate_missing "/app/custom_icons" "/defaults/custom_icons"
+# Seed bundled streaming layouts into writable layouts/ (non-destructive for unknown names)
+if [ -d "/defaults/layouts/bundled" ]; then
+    mkdir -p /app/layouts
+    # Always refresh managed presets from image defaults when newer (Python seed also runs)
+    cp -rn /defaults/layouts/bundled/. /app/layouts/ || true
+fi
 
 # Execute the main container command
 exec "$@"

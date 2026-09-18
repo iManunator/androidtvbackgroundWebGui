@@ -52,7 +52,8 @@ RUN mkdir -p /defaults && \
     if [ -d "overlays" ]; then cp -r overlays /defaults/; fi && \
     if [ -d "textures" ]; then cp -r textures /defaults/; fi && \
     if [ -d "fonts" ]; then cp -r fonts /defaults/; fi && \
-    if [ -d "custom_icons" ]; then cp -r custom_icons /defaults/; fi
+    if [ -d "custom_icons" ]; then cp -r custom_icons /defaults/; fi && \
+    if [ -d "layouts/bundled" ]; then mkdir -p /defaults/layouts && cp -r layouts/bundled /defaults/layouts/; fi
 
 # Setup entrypoint script
 COPY docker-entrypoint.sh /usr/local/bin/
