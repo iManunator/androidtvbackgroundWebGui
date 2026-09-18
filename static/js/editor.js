@@ -6368,7 +6368,7 @@ function renderCronJobs(jobs) {
             <div>
                 <div style="font-weight:bold; font-size:12px; color:#fff;">${job.name}</div>
                 <div style="font-size:10px; color:#aaa;">${job.layout_name} • ${job.start_time} • ${freqDisplay}</div>
-                <div style="font-size:10px; color:#888;">${job.overwrite ? 'Overwrite: On' : 'Overwrite: Off'} • ${job.cleanup ? 'Cleanup: On' : 'Cleanup: Off'}</div>
+                <div style="font-size:10px; color:#888;">${job.overwrite ? 'Replace same show: On' : 'Skip existing: On'} • ${job.cleanup ? 'Cleanup orphans: On' : 'Cleanup: Off'}</div>
             </div>
             <button onclick="deleteCronJob('${job.id}')" style="background:#c62828; border:none; color:white; padding:4px 8px; border-radius:3px; cursor:pointer; font-size:10px;">Del</button>
         `;

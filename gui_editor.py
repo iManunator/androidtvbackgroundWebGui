@@ -1,4 +1,4 @@
-CURRENT_VERSION = "1.5.10"
+CURRENT_VERSION = "1.6.0"
 import os
 import sys
 import json
@@ -31,6 +31,7 @@ from jellyfin_auth import (
 )
 import seerr_client
 import media_status
+import gallery_dedupe
 
 # Import the missing search trigger script
 try:
@@ -2538,17 +2539,21 @@ def save_editor_image():
     if overwrite_filename:
         filename = overwrite_filename
     else:
-        filename = f"custom_{int(time.time())}.jpg"
-        
-        if metadata and metadata.get('title'):
-            safe_title = "".join(c for c in metadata['title'] if c.isalnum() or c in " ._-").strip()
-            parts = [safe_title]
-            if metadata.get('year') and str(metadata['year']) != 'N/A':
-                parts.append(str(metadata['year']))
-            if metadata.get('imdb_id'):
-                parts.append(str(metadata['imdb_id']))
-            
-            filename = " - ".join(parts) + ".jpg"
+        if metadata and (metadata.get('title') or metadata.get('Name')):
+            filename = gallery_dedupe.preferred_filename(metadata)
+        else:
+            filename = f"custom_{int(time.time())}.jpg"
+
+    if metadata:
+        metadata = gallery_dedupe.enrich_metadata_identity(metadata)
+        data['metadata'] = metadata
+
+    # When replacing, remove other gallery files for the same show (old names / duplicates)
+    if data.get('replace_existing') or data.get('overwrite'):
+        try:
+            gallery_dedupe.delete_matches(full_path, metadata)
+        except Exception as e:
+            print(f"WARN: replace_existing cleanup failed: {e}")
 
     filepath = os.path.join(full_path, filename)
     
@@ -2616,6 +2621,37 @@ def save_editor_image():
         return jsonify({"status": "success", "filename": filename})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@gui_editor_bp.route('/api/gallery/check_media', methods=['POST'])
+def gallery_check_media():
+    """Check whether a wallpaper already exists for this show/movie (IMDb/TMDB/JF id)."""
+    data = request.json or {}
+    layout_name = data.get('layout_name') or data.get('layout') or 'Default'
+    metadata = data.get('metadata') or {}
+    safe_layout = "".join(c for c in str(layout_name) if c.isalnum() or c in " ._-").strip() or "Default"
+    layout_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "editor_backgrounds", safe_layout)
+    matches = gallery_dedupe.find_matches(layout_dir, metadata)
+    return jsonify({
+        "status": "success",
+        "exists": bool(matches),
+        "matches": matches,
+        "preferred_filename": gallery_dedupe.preferred_filename(metadata),
+    })
+
+
+@gui_editor_bp.route('/api/gallery/delete_media', methods=['POST'])
+def gallery_delete_media():
+    """Delete all gallery wallpapers for a show/movie (by identity keys)."""
+    data = request.json or {}
+    layout_name = data.get('layout_name') or data.get('layout') or 'Default'
+    metadata = data.get('metadata') or {}
+    safe_layout = "".join(c for c in str(layout_name) if c.isalnum() or c in " ._-").strip() or "Default"
+    layout_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "editor_backgrounds", safe_layout)
+    matches = gallery_dedupe.find_matches(layout_dir, metadata)
+    removed = gallery_dedupe.delete_bases(layout_dir, matches)
+    return jsonify({"status": "success", "deleted": removed, "matches": matches})
+
 
 @gui_editor_bp.route('/api/gallery/data/<folder>/<path:filename>')
 def get_gallery_image_data(folder, filename):

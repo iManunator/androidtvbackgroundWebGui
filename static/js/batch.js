@@ -308,6 +308,35 @@ async function startBatchProcess() {
         // (fetchMediaData comes from editor.js and handles the data fetching)
         await fetchMediaData(item ? item.id : null);
 
+        // Skip / replace by stable media identity (IMDb / TMDB / Jellyfin id)
+        const metaForCheck = (typeof lastFetchedData !== 'undefined' && lastFetchedData)
+            ? ((typeof extractMetadata === 'function') ? extractMetadata(lastFetchedData) : lastFetchedData)
+            : null;
+        if (metaForCheck) {
+            try {
+                const checkRes = await fetch('/api/gallery/check_media', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ layout_name: layoutName, metadata: metaForCheck })
+                });
+                const check = await checkRes.json();
+                if (check.exists && !overwrite) {
+                    logBatch(`Skipping ${label} (already generated)`);
+                    continue;
+                }
+                if (check.exists && overwrite) {
+                    await fetch('/api/gallery/delete_media', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ layout_name: layoutName, metadata: metaForCheck })
+                    });
+                    logBatch(`Replacing ${check.matches.length} old wallpaper(s) for ${label}`);
+                }
+            } catch (e) {
+                console.warn('gallery check_media failed', e);
+            }
+        }
+
         // --- FIX: Correct Layout (Fixes overflow issues) ---
         // Since the text content has changed, widths have changed.
         // We must manually trigger a layout recalculation before saving.
@@ -449,6 +478,8 @@ async function startBatchProcess() {
             target_type: 'gallery',
             organize_by_genre: sortGenre,
             metadata: metadata,
+            overwrite: overwrite,
+            replace_existing: overwrite,
             ambilight_image_data: ambilightDataURL // Add to payload
         };
 

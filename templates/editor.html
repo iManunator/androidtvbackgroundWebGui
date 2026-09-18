@@ -1733,13 +1733,16 @@
                                 <input type="checkbox" id="batchOverwrite" style="width:20px; height:20px; margin:0;" {%
                                     if config.general.overwrite_existing %}checked{% endif %}>
                                 <label for="batchOverwrite" style="margin:0; cursor:pointer;"
-                                    data-i18n="overwrite_existing">Overwrite Existing</label>
+                                    title="Delete old wallpapers for the same show/movie and recreate">Overwrite / replace same show</label>
                             </div>
                             <div style="display:flex; align-items:center; gap:10px; margin-top:5px;">
                                 <input type="checkbox" id="batchCleanup" style="width:20px; height:20px; margin:0;">
                                 <label for="batchCleanup" style="margin:0; cursor:pointer;"
-                                    data-i18n="cleanup_missing">Cleanup Missing Files</label>
+                                    title="Remove wallpapers whose title is no longer in the current list">Cleanup titles not in list</label>
                             </div>
+                            <p style="font-size:10px; color:#888; margin:6px 0 0; line-height:1.35;">
+                                With overwrite off, titles that already have a wallpaper (matched by IMDb/TMDB/Jellyfin id) are skipped.
+                            </p>
                             <div style="display:flex; align-items:center; gap:10px; margin-top:5px;">
                                 <input type="checkbox" id="batchLogoAutoFix" style="width:20px; height:20px; margin:0;"
                                     checked onchange="syncLogoAutoFix(this.checked)">
@@ -1864,12 +1867,15 @@
                                         style="display:flex; align-items:center; gap:5px; font-size:11px; cursor:pointer;"><input
                                             type="checkbox" id="cronJobOverwrite"
                                             style="width:14px; height:14px; margin:0;"> <span
-                                            data-i18n="overwrite_existing">Overwrite Existing</span></label>
+                                            title="Delete old wallpapers for the same show/movie (IMDb/TMDB/JF id) and recreate">Overwrite / replace same show</span></label>
                                     <label
                                         style="display:flex; align-items:center; gap:5px; font-size:11px; cursor:pointer;"><input
                                             type="checkbox" id="cronJobCleanup"
                                             style="width:14px; height:14px; margin:0;"> <span
-                                            data-i18n="cleanup_missing">Cleanup Missing Files</span></label>
+                                            title="Remove wallpapers whose title is no longer in today's Seerr/Jellyfin list">Cleanup titles not in list</span></label>
+                                    <p style="font-size:10px; color:#888; margin:4px 0 0; line-height:1.35;">
+                                        Leave overwrite off for daily runs: skip titles already generated, only create <b>new</b> Seerr/Jellyfin items. Enable cleanup to drop titles that left the list.
+                                    </p>
                                     <label
                                         style="display:flex; align-items:center; gap:5px; font-size:11px; cursor:pointer;"><input
                                             type="checkbox" id="cronJobRunNow"

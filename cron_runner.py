@@ -17,6 +17,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from jellyfin_auth import jellyfin_headers, jellyfin_image_url, jellyfin_items_base, resolve_jellyfin_user_id
 import seerr_client
 import media_status
+import gallery_dedupe
 from gui_editor import load_config, save_config, fetch_tmdb_details, format_seerr_item, format_jellyfin_item
 
 # Import the missing search trigger script
@@ -625,51 +626,38 @@ def fetch_items_and_process(job=None):
 
     log(f"Processing {len(all_meta)} items from {', '.join(providers)}...")
 
+    target_dir = os.path.join(os.path.dirname(__file__), 'editor_backgrounds', layout_name)
+    if not os.path.exists(target_dir):
+        os.makedirs(target_dir, exist_ok=True)
+
+    # Build gallery index once (ID-based skip / replace / cleanup)
+    gallery_index = gallery_dedupe.index_layout_dir(target_dir)
+
     # --- CLEANUP LOGIC ---
+    # Removes wallpapers whose media is no longer in today's Seerr/Jellyfin list
     if job.get('cleanup', False):
         if len(all_meta) > 0:
-            log("Cleanup active: Removing orphan files...")
-            target_dir = os.path.join(os.path.dirname(__file__), 'editor_backgrounds', layout_name)
-            if os.path.exists(target_dir):
-                valid_filenames = set()
-                valid_ids = set()
-                
-                for meta in all_meta:
-                    # 1. Track valid IDs
-                    if meta.get('id'):
-                        valid_ids.add(str(meta.get('id')))
-                    
-                    # 2. Track valid Filenames (Fallback)
-                    safe_title = "".join(c for c in meta.get('title', '') if c.isalnum() or c in " ._-").strip()
-                    base = f"{safe_title} - {meta.get('year')}"
-                    valid_filenames.add(base)
-                
-                for f in os.listdir(target_dir):
-                    if f.endswith('.json'):
-                        json_path = os.path.join(target_dir, f)
-                        should_delete = False
-                        try:
-                            with open(json_path, 'r', encoding='utf-8') as jf:
-                                data = json.load(jf)
-                                meta_id = str(data.get('metadata', {}).get('id', ''))
-                                
-                                if meta_id and meta_id in valid_ids:
-                                    should_delete = False # ID match -> Keep
-                                else:
-                                    # No ID match (or no ID in file). Check filename as fallback.
-                                    base_name = f.replace('.json', '')
-                                    if base_name not in valid_filenames:
-                                        should_delete = True
-                        except:
-                            should_delete = False # Error reading -> Skip to be safe
-                        
-                        if should_delete:
-                            base = f.replace('.json', '')
-                            for ext in ['.json', '.jpg', '.ambilight.jpg']:
-                                try: os.remove(os.path.join(target_dir, base + ext))
-                                except: pass
+            log("Cleanup active: Removing orphan files (ID-based)...")
+            valid_keys = set()
+            for meta in all_meta:
+                valid_keys |= gallery_dedupe.identity_keys(meta)
+
+            deleted = 0
+            for entry in list(gallery_index):
+                keys = entry.get("keys") or set()
+                # Keep if any strong identity overlaps the current list
+                if keys & valid_keys:
+                    continue
+                gallery_dedupe.delete_bases(target_dir, [entry["base"]])
+                deleted += 1
+            if deleted:
+                log(f"Cleanup removed {deleted} outdated wallpaper(s).")
+                gallery_index = gallery_dedupe.index_layout_dir(target_dir)
         else:
             log("Cleanup skipped: No items found (Safety check).")
+
+    do_overwrite = bool(job.get('overwrite', False) or job.get('refresh_watch_status', False))
+    skip_existing = not do_overwrite
 
     for meta in all_meta:
         if os.path.exists(STOP_SIGNAL_FILE): break
@@ -683,25 +671,36 @@ def fetch_items_and_process(job=None):
                     log(f"Job {job.get('name')} changed state. Stopping."); break
             except: pass
 
-        safe_title = "".join(c for c in meta.get('title', '') if c.isalnum() or c in " ._-").strip()
+        title = meta.get('title') or 'untitled'
         if job.get('dry_run'):
-            log(f"[Dry Run] Processing: {safe_title}"); continue
-            
-        output_base_name = f"{safe_title} - {meta.get('year')}"
-        filename_for_api = f"{output_base_name}.jpg"
+            matches = gallery_dedupe.find_matches(target_dir, meta, index=gallery_index)
+            if skip_existing and matches:
+                log(f"[Dry Run] Skip (exists): {title}")
+            elif do_overwrite and matches:
+                log(f"[Dry Run] Replace {len(matches)} old file(s): {title}")
+            else:
+                log(f"[Dry Run] Would create: {title}")
+            continue
 
-        # Refresh watch status forces overwrite so badges update on schedule
-        do_overwrite = bool(job.get('overwrite', False) or job.get('refresh_watch_status', False))
-        if not do_overwrite:
-            target_dir = os.path.join(os.path.dirname(__file__), 'editor_backgrounds', layout_name)
-            if os.path.exists(os.path.join(target_dir, filename_for_api)):
-                log(f"Skipping {safe_title} (Exists)"); continue
-        
-        log(f"Rendering: {meta['title']} ({meta.get('source', 'Unknown')}) [{meta.get('watch_state') or meta.get('library_state') or '-'}]")
+        matches = gallery_dedupe.find_matches(target_dir, meta, index=gallery_index)
+        if skip_existing and matches:
+            log(f"Skipping {title} (already generated)")
+            continue
+
+        if do_overwrite and matches:
+            n = gallery_dedupe.delete_bases(target_dir, matches)
+            log(f"Replacing {n} old wallpaper(s) for {title}")
+            gallery_index = [e for e in gallery_index if e.get("base") not in set(matches)]
+
+        filename_for_api = gallery_dedupe.preferred_filename(meta)
+        meta = gallery_dedupe.enrich_metadata_identity(meta)
+
+        log(f"Rendering: {meta.get('title')} ({meta.get('source', 'Unknown')}) [{meta.get('watch_state') or meta.get('library_state') or '-'}]")
         
         # Enrich with OMDb data before rendering
         meta = enrich_with_omdb(meta, config)
         meta = media_status.attach_primary_score(meta)
+        meta = gallery_dedupe.enrich_metadata_identity(meta)
         
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_output_base_path = os.path.join(temp_dir, 'output')
@@ -709,9 +708,18 @@ def fetch_items_and_process(job=None):
             if img_b64 and json_data:
                 payload = {"image": img_b64, "layout_name": layout_name, "metadata": meta, "canvas_json": json_data, "overwrite_filename": filename_for_api, "target_type": "gallery"}
                 if ambilight_b64: payload['ambilight_image_data'] = ambilight_b64
-                try: requests.post(API_URL, json=payload)
-                except Exception as e: log(f"Upload failed: {e}")
-            else: log("Rendering failed.")
+                try:
+                    requests.post(API_URL, json=payload, timeout=60)
+                    # Keep index fresh for subsequent items in this run
+                    gallery_index.append({
+                        "base": filename_for_api[:-4] if filename_for_api.endswith('.jpg') else filename_for_api,
+                        "keys": gallery_dedupe.identity_keys(meta),
+                        "json_path": "",
+                    })
+                except Exception as e:
+                    log(f"Upload failed: {e}")
+            else:
+                log("Rendering failed.")
     log("Batch Finished.")
 
 
