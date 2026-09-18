@@ -1196,6 +1196,43 @@ function resolveProviderLogoFile(mediaData) {
     return seerrItem ? 'seerrlogo.png' : 'jellyfinlogo.png';
 }
 
+function ensureWatchStatusTag() {
+    if (!canvas || typeof fabric === 'undefined') return;
+    const existing = canvas.getObjects().find(o => o.dataTag === 'watch_status');
+    if (existing) {
+        existing.set('visible', true);
+        return;
+    }
+    // Streaming left-top layouts should always include a watch chip
+    if (window.layoutAnchorMode !== 'left_top') return;
+
+    const score = canvas.getObjects().find(o => o.dataTag === 'primary_score');
+    const provider = canvas.getObjects().find(o => o.dataTag === 'provider_source');
+    const title = canvas.getObjects().find(o => o.dataTag === 'title');
+    const anchor = score || title;
+    const left = (anchor && anchor.left != null) ? anchor.left : (parseInt(document.getElementById('marginLeftInput')?.value) || 80);
+    let top = 308;
+    if (score) top = score.top + (score.getScaledHeight ? score.getScaledHeight() : 36) + 16;
+    else if (title) top = title.top + (title.getScaledHeight ? title.getScaledHeight() : 130) + 24;
+
+    const text = new fabric.IText('Unwatched', {
+        left,
+        top,
+        fontFamily: 'Roboto',
+        fontSize: 26,
+        fill: '#ffffff',
+        shadow: '2px 2px 8px rgba(0,0,0,0.75)',
+        dataTag: 'watch_status',
+        editable: false,
+        visible: true
+    });
+    canvas.add(text);
+    // Keep watch above overview / below score
+    if (provider && typeof text.moveTo === 'function') {
+        try { canvas.moveTo(text, canvas.getObjects().indexOf(provider)); } catch (e) {}
+    }
+}
+
 function resolveProviderCaption(mediaData, pLogo) {
     if (pLogo !== 'seerrlogo.png' || !mediaData) return '';
     const lib = mediaData.library_state || '';
@@ -1365,6 +1402,8 @@ function addSeerrAvailabilityBadge() {
 }
 
 function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
+    if (!canvas || !mediaData) return;
+    ensureWatchStatusTag();
     return new Promise((resolve) => {
         if (!canvas || !mediaData) { resolve(); return; }
 
@@ -1625,47 +1664,57 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                             wLabel = wState === 'watched' ? 'Watched'
                                 : (wState === 'partially_watched' ? 'In progress' : 'Unwatched');
                         }
-                        // Always show watch chip on layouts that include this tag
                         let wIcon = '/static/provider_logos/watch_unwatched.svg';
                         if (wState === 'watched' || /^(watched)$/i.test(String(wLabel))) {
                             wIcon = '/static/provider_logos/watch_watched.svg';
                         } else if (wState === 'partially_watched' || /%|progress|partial/i.test(String(wLabel))) {
                             wIcon = '/static/provider_logos/watch_partial.svg';
                         }
-                        const wp = new Promise(resolve => {
-                            fabric.Image.fromURL(wIcon, function (img, isError) {
-                                if (isError || !img) {
-                                    obj.set({ text: wLabel, visible: true });
-                                    resolve();
-                                    return;
-                                }
-                                let fontSize = obj.fontSize || 28;
-                                let fill = 'white';
-                                let fontFamily = 'Roboto';
-                                if (obj.type === 'group' && obj.getObjects) {
-                                    const t = obj.getObjects().find(o => o.type === 'i-text' || o.type === 'text');
-                                    if (t) {
-                                        if (t.fontSize) fontSize = t.fontSize;
-                                        if (t.fill) fill = t.fill;
-                                        if (t.fontFamily) fontFamily = t.fontFamily;
-                                    }
-                                }
-                                const text = new fabric.IText(String(wLabel), {
-                                    fontFamily, fontSize, fill, editable: false,
-                                    shadow: '2px 2px 8px rgba(0,0,0,0.7)'
-                                });
-                                img.scaleToHeight(text.getScaledHeight() * 0.95);
-                                img.set({ left: 0, top: 0 });
-                                text.set({ left: img.getScaledWidth() + 10, top: 0 });
+                        const left0 = obj.left;
+                        const top0 = obj.top;
+                        const fontSize = (obj.type === 'group' && obj.getObjects)
+                            ? ((obj.getObjects().find(o => o.type === 'i-text' || o.type === 'text') || {}).fontSize || 26)
+                            : (obj.fontSize || 26);
+
+                        const finishWatchChip = (img) => {
+                            const text = new fabric.IText(String(wLabel), {
+                                fontFamily: 'Roboto',
+                                fontSize,
+                                fill: '#ffffff',
+                                editable: false,
+                                shadow: '2px 2px 10px rgba(0,0,0,0.85)'
+                            });
+                            const th = text.getScaledHeight();
+                            if (img) {
+                                img.scaleToHeight(th * 0.95);
+                                img.set({ left: 0, top: Math.max(0, (th - img.getScaledHeight()) / 2), originX: 'left', originY: 'top' });
+                                text.set({ left: img.getScaledWidth() + 10, top: 0, originX: 'left', originY: 'top' });
                                 const group = new fabric.Group([img, text], {
-                                    left: obj.left, top: obj.top,
+                                    left: left0, top: top0,
                                     originX: 'left', originY: 'top',
-                                    dataTag: 'watch_status'
+                                    dataTag: 'watch_status',
+                                    visible: true
                                 });
                                 canvas.remove(obj);
                                 canvas.add(group);
+                            } else {
+                                text.set({ left: left0, top: top0, dataTag: 'watch_status', visible: true });
+                                canvas.remove(obj);
+                                canvas.add(text);
+                            }
+                        };
+
+                        const wp = new Promise(resolve => {
+                            // Local static SVG — no crossOrigin (avoids silent load failures)
+                            fabric.Image.fromURL(wIcon, function (img, isError) {
+                                try {
+                                    finishWatchChip((isError || !img) ? null : img);
+                                } catch (e) {
+                                    console.warn('watch_status render failed', e);
+                                    obj.set({ text: String(wLabel), fill: '#ffffff', visible: true });
+                                }
                                 resolve();
-                            }, { crossOrigin: 'anonymous' });
+                            });
                         });
                         promises.push(wp);
                         val = undefined;
@@ -1760,7 +1809,7 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                                 fabric.Image.fromURL(logoUrl, function (img, isError) {
                                     if (isError || !img) {
                                         // Fallback to text only
-                                        obj.set({ text: (pText || srcVal), visible: true });
+                                        obj.set({ text: (pText || srcVal), fill: '#ffffff', visible: true });
                                         resolve();
                                         return;
                                     }
@@ -1819,25 +1868,30 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                                         return;
                                     }
 
-                                    // Seerr: logo + "Request on Seerr" in elegant font
-                                    const captionFont = 'Georgia';
-                                    const captionSize = Math.max(22, Math.round((currentProps.fontSize || 28) * 0.95));
-                                    const textObj = new fabric.IText('—  ' + pText, {
-                                        fontFamily: captionFont,
+                                    // Seerr: logo + white italic caption, vertically centered
+                                    const captionSize = Math.max(24, Math.round((obj.fontSize || 28) * 0.9));
+                                    const textObj = new fabric.IText(pText, {
+                                        fontFamily: 'Georgia, Times New Roman, serif',
                                         fontSize: captionSize,
                                         fontStyle: 'italic',
-                                        fill: currentProps.fill || '#f5f5f5',
-                                        shadow: currentProps.shadow || '2px 2px 8px rgba(0,0,0,0.75)',
-                                        stroke: currentProps.stroke,
-                                        strokeWidth: currentProps.strokeWidth,
+                                        fill: '#ffffff',
+                                        shadow: '2px 2px 10px rgba(0,0,0,0.9)',
+                                        stroke: null,
+                                        strokeWidth: 0,
                                         textAlign: 'left',
-                                        originY: 'center',
+                                        originX: 'left',
+                                        originY: 'top',
                                         editable: false
                                     });
-                                    const targetH = obj.slotHeight || (obj.type === 'image' ? obj.getScaledHeight() : null) || (captionSize * 1.25);
+                                    const targetH = Math.max(
+                                        obj.slotHeight || 0,
+                                        (obj.type === 'image' ? obj.getScaledHeight() : 0) || 0,
+                                        captionSize * 1.35
+                                    );
                                     img.scaleToHeight(targetH);
-                                    img.set({ left: 0, top: 0, originY: 'center' });
-                                    textObj.set({ left: img.getScaledWidth() + 14, top: img.getScaledHeight() / 2 });
+                                    img.set({ left: 0, top: 0, originX: 'left', originY: 'top' });
+                                    const textTop = Math.max(0, (img.getScaledHeight() - textObj.getScaledHeight()) / 2);
+                                    textObj.set({ left: img.getScaledWidth() + 16, top: textTop });
                                     const group = new fabric.Group([img, textObj], {
                                         left: obj.left,
                                         top: obj.top,
@@ -1845,7 +1899,8 @@ function previewTemplate(mediaData, skipRender = false, preloadedLogo = null) {
                                         originY: 'top',
                                         dataTag: 'provider_source',
                                         providerLogoFile: pLogo,
-                                        slotHeight: targetH
+                                        slotHeight: targetH,
+                                        visible: true
                                     });
                                     canvas.remove(obj);
                                     canvas.add(group);
@@ -2491,6 +2546,7 @@ async function loadStreamingLayout(name) {
         if (alignSel) alignSel.value = 'left';
         const textAlign = document.getElementById('textContentAlignSelect');
         if (textAlign) textAlign.value = 'left';
+        ensureWatchStatusTag();
         if (typeof lastFetchedData !== 'undefined' && lastFetchedData) {
             await previewTemplate(lastFetchedData);
         }

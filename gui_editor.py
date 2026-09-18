@@ -1,4 +1,4 @@
-CURRENT_VERSION = "1.5.4"
+CURRENT_VERSION = "1.5.5"
 import os
 import sys
 import json
@@ -201,7 +201,7 @@ KNOWN_DIRS = [
 LAYOUTS_DIR = 'layouts'
 LAYOUT_BUNDLED_DIR = os.path.join(LAYOUTS_DIR, 'bundled')
 LAYOUT_PREVIEWS_DIR = os.path.join(LAYOUTS_DIR, 'previews')
-LAYOUT_PRESET_VERSION = 3
+LAYOUT_PRESET_VERSION = 4
 MANAGED_LAYOUT_NAMES = {
     "Default",
     "Netflix Hero",
@@ -251,6 +251,7 @@ def seed_bundled_layouts():
             continue
         bundled_ver = int(bundled.get("layout_preset_version") or LAYOUT_PRESET_VERSION)
         existing_ver = -1
+        missing_watch = False
         if os.path.exists(dst):
             try:
                 with open(dst, "r", encoding="utf-8") as f:
@@ -258,11 +259,18 @@ def seed_bundled_layouts():
                 # Only auto-upgrade managed names (or files already marked managed)
                 if name in MANAGED_LAYOUT_NAMES or existing.get("managed_preset"):
                     existing_ver = int(existing.get("layout_preset_version") or 0)
+                    tags = [
+                        o.get("dataTag")
+                        for o in (existing.get("objects") or [])
+                        if isinstance(o, dict)
+                    ]
+                    missing_watch = "watch_status" not in tags
                 else:
                     continue
             except Exception:
                 existing_ver = 0
-        if bundled_ver > existing_ver or not os.path.exists(dst):
+                missing_watch = True
+        if bundled_ver > existing_ver or not os.path.exists(dst) or missing_watch:
             try:
                 shutil.copy2(src, dst)
                 print(f"Seeded layout preset: {name} (v{bundled_ver})")

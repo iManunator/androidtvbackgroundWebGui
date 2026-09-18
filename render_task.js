@@ -1934,25 +1934,28 @@ function getCertificationFilename(rating) {
                                             return;
                                         }
 
-                                        const textObj = new fabric.IText('—  ' + providerText, {
-                                            fontFamily: 'Georgia',
-                                            fontSize: Math.max(22, Math.round((currentSize || 28) * 0.95)),
+                                        const textObj = new fabric.IText(providerText, {
+                                            fontFamily: 'Georgia, Times New Roman, serif',
+                                            fontSize: Math.max(24, Math.round((currentSize || 28) * 0.9)),
                                             fontStyle: 'italic',
-                                            fill: currentFill || '#f5f5f5',
-                                            shadow: '2px 2px 8px rgba(0,0,0,0.75)',
-                                            originY: 'center',
+                                            fill: '#ffffff',
+                                            shadow: '2px 2px 10px rgba(0,0,0,0.9)',
+                                            strokeWidth: 0,
                                             originX: 'left',
+                                            originY: 'top',
                                             left: 0,
                                             top: 0,
                                             editable: false
                                         });
 
-                                        const targetH = obj.slotHeight || (currentSize * 1.25) || (textObj.getScaledHeight() * 1.15);
+                                        const targetH = Math.max(obj.slotHeight || 0, currentSize * 1.35, textObj.getScaledHeight());
                                         img.scaleToHeight(targetH);
-                                        img.set({ originY: 'center', originX: 'left', left: 0, top: 0 });
-                                        textObj.set({ left: img.getScaledWidth() + 14, top: img.getScaledHeight() / 2 });
+                                        img.set({ originX: 'left', originY: 'top', left: 0, top: 0 });
+                                        textObj.set({
+                                            left: img.getScaledWidth() + 16,
+                                            top: Math.max(0, (img.getScaledHeight() - textObj.getScaledHeight()) / 2)
+                                        });
 
-                                        // Group: logo left, caption right
                                         const group = new fabric.Group([img, textObj], {
                                             left: obj.left,
                                             top: obj.top,

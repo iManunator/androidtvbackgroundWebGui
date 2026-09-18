@@ -87,7 +87,8 @@
         "affectStroke": false,
         "nonScaling": false
       },
-      "dataTag": "watch_status"
+      "dataTag": "watch_status",
+      "visible": true
     },
     {
       "type": "i-text",
@@ -139,7 +140,7 @@
     "backgroundMode": "gradient"
   },
   "managed_preset": true,
-  "layout_preset_version": 3,
+  "layout_preset_version": 4,
   "layout_anchor": "left_top",
   "preset_name": "Status Focus"
 }
