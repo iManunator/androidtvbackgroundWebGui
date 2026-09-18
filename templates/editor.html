@@ -1071,6 +1071,7 @@
                         <button onclick="addMetadataTag('overview', 'Movie description...')">Overview</button>
                         <button onclick="addMetadataTag('provider_source', 'Now available on...')">Provider
                             Info</button>
+                        <button onclick="addSeerrAvailabilityBadge()" style="background:#00897b; color:#fff;">Available on Seerr</button>
                         <button onclick="addMetadataTag('availability', 'Not in library')">Seerr Availability</button>
                         <button onclick="addMetadataTag('availability_label', 'Requestable')">Seerr Status Label</button>
                         <button onclick="addMetadataTag('certification', 'FSK 16')">Age Rating (Image)</button>
@@ -1239,6 +1240,9 @@
                                 data-i18n="shuffle_preview">🎲 <span>Shuffle Preview</span></button>
                             <button id="btn-request-seerr" onclick="requestCurrentViaSeerr()"
                                 style="display:none; background: #6a1b9a; padding: 8px 12px; border: none; border-radius: 4px; color: white; cursor: pointer;">Request via Seerr</button>
+                            <button id="btn-add-seerr-badge" onclick="addSeerrAvailabilityBadge()"
+                                style="display:none; background: #00897b; padding: 8px 12px; border: none; border-radius: 4px; color: white; cursor: pointer;"
+                                title="Place Seerr availability text + logo on the wallpaper">Available on Seerr</button>
                             <span id="availability-chip"
                                 style="display:none; font-size: 11px; padding: 4px 8px; border-radius: 10px; background:#333; color:#eee;"></span>
                             <span id="source-indicator"

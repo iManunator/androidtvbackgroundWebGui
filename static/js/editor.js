@@ -1110,12 +1110,21 @@ async function fetchMediaData(itemId = null) {
     }
 }
 
+function isSeerrMedia(data) {
+    if (!data) return false;
+    const id = String(data.id || '');
+    const src = String(data.source || '');
+    return id.startsWith('jellyseerr-') || id.startsWith('seerr-') || !!data.seerr_url || src.startsWith('Seerr') || src === 'Jellyseerr';
+}
+
 function updateSeerrUi(data) {
     const btn = document.getElementById('btn-request-seerr');
+    const badgeBtn = document.getElementById('btn-add-seerr-badge');
     const chip = document.getElementById('availability-chip');
     if (!btn || !chip) return;
+    const seerrItem = isSeerrMedia(data);
     const label = data && (data.availability_label || data.availability);
-    if (label) {
+    if (seerrItem && label) {
         chip.style.display = 'inline-block';
         chip.innerText = label;
         const avail = data.availability;
@@ -1130,6 +1139,31 @@ function updateSeerrUi(data) {
     } else {
         btn.style.display = 'none';
     }
+    if (badgeBtn) {
+        if (seerrItem) {
+            badgeBtn.style.display = 'inline-block';
+            const avail = data.availability;
+            if (avail === 'available' || avail === 'partial') badgeBtn.innerText = 'Available on Seerr';
+            else if (avail === 'pending' || avail === 'processing') badgeBtn.innerText = 'Requested on Seerr';
+            else badgeBtn.innerText = 'Request on Seerr';
+        } else {
+            badgeBtn.style.display = 'none';
+        }
+    }
+}
+
+function addSeerrAvailabilityBadge() {
+    if (!canvas) return;
+    if (!isSeerrMedia(lastFetchedData)) {
+        alert('Load a Seerr title first (Shuffle → Seerr).');
+        return;
+    }
+    const existing = canvas.getObjects().find(o => o.dataTag === 'provider_source');
+    if (!existing) {
+        addMetadataTag('provider_source', 'Now available on...');
+    }
+    // Fill badge with current Seerr availability text + logo
+    previewTemplate(lastFetchedData);
 }
 
 async function requestCurrentViaSeerr() {
