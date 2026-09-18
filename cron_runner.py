@@ -273,7 +273,7 @@ def fetch_jellyfin_cron(config, job):
             if it.get('ParentId') in boxset_ids and 'Logo' in it.get('ImageTags', {}):
                 # keep logo suppression for boxset children via format path
                 pass
-            formatted = format_jellyfin_item(it, base_url, jf['api_key'], user_id)
+            formatted = format_jellyfin_item(it, base_url, jf['api_key'], user_id, config)
             if it.get('ParentId') in boxset_ids:
                 formatted['logo_url'] = None
             formatted['action_url'] = f"jellyfin://items/{it.get('Id')}"

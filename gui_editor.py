@@ -1,4 +1,4 @@
-CURRENT_VERSION = "1.4.0"
+CURRENT_VERSION = "1.4.1"
 import os
 import sys
 import json
@@ -433,7 +433,107 @@ def get_plex_season_count(server_url, rating_key, token):
         print(f"Error fetching Plex seasons: {e}")
     return 0
 
-def format_jellyfin_item(item, clean_url, api_key, user_id=None):
+def _jellyfin_tmdb_id(item: dict):
+    pids = item.get("ProviderIds") or {}
+    if not isinstance(pids, dict):
+        return None
+    for key in ("Tmdb", "tmdb", "TmdbId", "TMDB"):
+        if pids.get(key) not in (None, ""):
+            try:
+                return int(str(pids.get(key)).strip())
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def _jellyfin_media_type(item: dict) -> str:
+    t = (item.get("Type") or "").lower()
+    if t in ("series", "season", "episode", "tv"):
+        return "tv"
+    return "movie"
+
+
+# Seerr/TMDB metadata keys to merge onto Jellyfin payloads (never overwrite watch/library/source/art).
+_SEERR_META_KEYS = (
+    "tagline", "status", "collection", "genre_list", "writers", "editors", "keywords",
+    "countries", "language", "budget", "revenue", "certification",
+    "release_theatrical", "release_digital", "release_physical",
+    "seerr_rt", "seerr_rt_audience", "seerr_imdb", "seerr_tmdb",
+    "tmdb_id", "media_type", "seerr_url",
+)
+
+
+def enrich_jellyfin_with_seerr(payload: dict, item: dict, config: dict = None) -> dict:
+    """Fill Seerr Info fields on a Jellyfin item using TMDB id via Seerr API."""
+    if not payload or not config:
+        return payload
+    conf = seerr_client.get_seerr_conf(config)
+    if not conf.get("url") or not conf.get("api_key"):
+        return payload
+
+    tid = payload.get("tmdb_id") or _jellyfin_tmdb_id(item)
+    if tid is None:
+        pids = payload.get("provider_ids") or {}
+        if isinstance(pids, dict):
+            for key in ("Tmdb", "tmdb"):
+                if pids.get(key) not in (None, ""):
+                    try:
+                        tid = int(str(pids.get(key)).strip())
+                        break
+                    except (TypeError, ValueError):
+                        pass
+    if tid is None:
+        return payload
+
+    mt = payload.get("media_type") or _jellyfin_media_type(item)
+    try:
+        enriched = seerr_client.enrich_item(conf["url"], conf["api_key"], mt, int(tid), config) or {}
+    except Exception as e:
+        print(f"Jellyfin Seerr enrich error: {e}")
+        return payload
+
+    if not enriched:
+        return payload
+
+    payload["tmdb_id"] = int(tid)
+    payload["media_type"] = "tv" if mt in ("tv", "show", "series") else "movie"
+
+    for key in _SEERR_META_KEYS:
+        val = enriched.get(key)
+        if val in (None, "", [], {}):
+            continue
+        # Don't blank existing jellyfin values with empties; prefer enriched for Seerr-specific keys
+        if key.startswith("seerr_") or key in (
+            "tagline", "collection", "release_theatrical", "release_digital", "release_physical",
+            "budget", "revenue", "language", "writers", "editors", "keywords", "countries", "genre_list",
+        ):
+            payload[key] = val
+        elif not payload.get(key):
+            payload[key] = val
+
+    # Fill genres string from genre_list if missing/weak
+    if enriched.get("genre_list") and (not payload.get("genres") or payload.get("genres") == ""):
+        payload["genres"] = ", ".join(enriched["genre_list"])
+    elif enriched.get("genres") and not payload.get("genres"):
+        payload["genres"] = enriched["genres"]
+
+    # Prefer Seerr cast/crew lists when Jellyfin People was empty
+    for list_key in ("actors", "directors", "studios"):
+        if enriched.get(list_key) and not payload.get(list_key):
+            payload[list_key] = enriched[list_key]
+
+    if enriched.get("officialRating") and not payload.get("officialRating"):
+        payload["officialRating"] = enriched["officialRating"]
+    if enriched.get("certification") and not payload.get("certification"):
+        payload["certification"] = enriched["certification"]
+    if enriched.get("imdb_id") and not payload.get("imdb_id"):
+        payload["imdb_id"] = enriched["imdb_id"]
+
+    # Keep Jellyfin as source of truth for art, watch, library
+    return payload
+
+
+def format_jellyfin_item(item, clean_url, api_key, user_id=None, config=None):
     # Check for Logo availability
     has_logo = 'Logo' in item.get('ImageTags', {})
     logo_url = jellyfin_image_url(clean_url, item['Id'], 'Logo', api_key) if has_logo else None
@@ -448,7 +548,7 @@ def format_jellyfin_item(item, clean_url, api_key, user_id=None):
     if item.get('Type') == 'Series' and user_id:
         season_count = get_jellyfin_season_count(clean_url, item['Id'], user_id, api_key)
         if season_count > 0:
-            runtime_str = f"{season_count} Season{'s' if season_count > 1 else ''}"
+            runtime_str = f"{season_count} Season{'s' if season_count != 1 else ''}"
     # ----------------------------------------------------------
 
     # Extract Actors and Directors from People
@@ -464,8 +564,13 @@ def format_jellyfin_item(item, clean_url, api_key, user_id=None):
             p.get('Name') for p in people if p.get('Type') == 'Writer'
         ))
 
+    writers = list(dict.fromkeys(
+        p.get('Name') for p in people if p.get('Type') == 'Writer'
+    ))
+
     status = media_status.jellyfin_status_fields(item)
-    return {
+    tmdb_id = _jellyfin_tmdb_id(item)
+    payload = {
         "id": item.get('Id'),
         "title": item.get('Name'),
         "original_title": item.get('OriginalTitle'),
@@ -476,6 +581,7 @@ def format_jellyfin_item(item, clean_url, api_key, user_id=None):
         "tags": item.get('Tags', []),
         "actors": actors,
         "directors": directors,
+        "writers": writers,
         "studios": [s.get('Name') for s in item.get('Studios', [])],
         "provider_ids": item.get('ProviderIds', {}),
         "runtime": runtime_str,
@@ -484,9 +590,13 @@ def format_jellyfin_item(item, clean_url, api_key, user_id=None):
         "officialRating": item.get('OfficialRating'),
         "inheritedParentalRatingValue": item.get('InheritedParentalRatingValue'),
         "imdb_id": item.get('ProviderIds', {}).get('Imdb'),
+        "tmdb_id": tmdb_id,
+        "media_type": _jellyfin_media_type(item),
         "source": "Jellyfin",
         **status,
     }
+    return enrich_jellyfin_with_seerr(payload, item, config)
+
 
 def fetch_jellyfin_list(config, filter_mode, filter_val, item_types, limit_count, request_args):
     jf = config.get('jellyfin', {})
@@ -965,7 +1075,7 @@ def get_random_media():
             
             if valid_items:
                 item = random.choice(valid_items)
-                return jsonify(format_jellyfin_item(item, clean_url, jf['api_key'], user_id))
+                return jsonify(format_jellyfin_item(item, clean_url, jf['api_key'], user_id, config))
         except Exception as e:
             print(f"DEBUG: Jellyfin Error: {e}")
             if provider == 'jellyfin':
@@ -1270,7 +1380,7 @@ def get_media_item(item_id):
             try:
                 r = requests.get(url, headers=headers, timeout=5)
                 r.raise_for_status()
-                return jsonify(format_jellyfin_item(r.json(), clean_url, jf['api_key'], user_id))
+                return jsonify(format_jellyfin_item(r.json(), clean_url, jf['api_key'], user_id, config))
             except Exception as e:
                 return jsonify({"error": str(e)}), 500
 
